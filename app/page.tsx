@@ -20,8 +20,8 @@ type EntryStage = "login" | "organization" | "database" | "editor";
 type EditorSection = "Overview" | "Workflows" | "Executions" | "Devices" | "Alerts" | "Settings";
 type Viewport = { x: number; y: number; zoom: number };
 
-const NODE_W = 214;
-const NODE_H = 108;
+const NODE_W = 112;
+const NODE_H = 132;
 const DEFAULT_VIEWPORT: Viewport = { x: 160, y: 80, zoom: 0.9 };
 
 const initialNodes: WorkflowNode[] = [
@@ -174,6 +174,24 @@ export default function NetworkAutomationEditor() {
   const [aiInstruction, setAiInstruction] = useState(
     "Write a concise, professional network fault notification. Include the affected device, IP, severity, evidence and recommended action."
   );
+  const [aiKeys, setAiKeys] = useState<Record<string, string>>({
+    Gemini: "",
+    Groq: "",
+    OpenAI: "",
+    Anthropic: "",
+    Mistral: "",
+    Custom: "",
+  });
+  const [aiModels, setAiModels] = useState<Record<string, string>>({
+    Gemini: "gemini-2.5-flash",
+    Groq: "llama-3.3-70b-versatile",
+    OpenAI: "gpt-5-mini",
+    Anthropic: "claude-sonnet-4-5",
+    Mistral: "mistral-large-latest",
+    Custom: "",
+  });
+  const [aiBaseUrls, setAiBaseUrls] = useState<Record<string, string>>({ Custom: "" });
+  const [aiKeyState, setAiKeyState] = useState("");
   const adminEmail = currentUser.email || smtpRecipients || "admin@example.com";
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -555,25 +573,34 @@ export default function NetworkAutomationEditor() {
           {nodes.map((node) => (
             <div
               key={node.id}
-              className={`wf-node type-${node.type} ${selectedNode === node.id ? "selected" : ""} ${running ? "running" : ""}`}
-              style={{ left: node.x, top: node.y, width: NODE_W }}
+              className={`wf-node wf-node-compact type-${node.type} ${selectedNode === node.id ? "selected" : ""} ${running ? "running" : ""}`}
+              style={{ left: node.x, top: node.y, width: NODE_W, height: NODE_H }}
               onPointerDown={(e) => onNodePointerDown(e, node)}
+              title={`${node.name} — ${node.description}`}
+              aria-label={`${node.name}. ${node.description}`}
             >
               <span className="handle handle-in" />
-              <div className="wf-node-strip" />
-              <div className="wf-node-head">
-                <span className={`wf-node-icon type-${node.type}`}><NodeGlyph icon={node.icon} size={18} /></span>
-                <div className="wf-node-title">
-                  <strong>{node.name}</strong>
-                  <small>{typeLabel(node.type)} node</small>
-                </div>
-                <button className="node-delete" onPointerDown={(e) => e.stopPropagation()} onClick={() => removeNode(node.id)}><X size={14} /></button>
+              <div className="wf-node-orb">
+                <span className={`wf-node-icon type-${node.type}`}><NodeGlyph icon={node.icon} size={30} /></span>
+                {running && <span className="wf-node-pulse" />}
               </div>
-              <div className="wf-node-desc">{node.description}</div>
-              {node.name === "Send Fault Email" && <div className="wf-node-meta">Google SMTP · Nodemailer</div>}
-              {node.name === "Network Fault Detected" && <div className="wf-node-meta">Device monitoring event</div>}
+              <div className="wf-node-hover-card">
+                <div className="wf-node-hover-top">
+                  <span className="wf-node-hover-icon"><NodeGlyph icon={node.icon} size={18} /></span>
+                  <div><strong>{node.name}</strong><small>{typeLabel(node.type)} node</small></div>
+                </div>
+                <p>{node.description}</p>
+                {node.name === "Send Gmail" && <span className="wf-node-hover-meta">Google SMTP · Nodemailer</span>}
+                {node.name === "AI Message" && <span className="wf-node-hover-meta">AI provider · API key</span>}
+              </div>
+              <span className="wf-node-label">{node.name}</span>
+              <button className="node-delete node-delete-compact" aria-label={`Delete ${node.name}`} onPointerDown={(e) => e.stopPropagation()} onClick={() => removeNode(node.id)}>
+                <X size={12} />
+              </button>
               <span className="handle handle-out" />
-              <button className="quick-add" onPointerDown={(e) => e.stopPropagation()} onClick={() => insertAfter(node.id)}><Plus size={13} /></button>
+              <button className="quick-add quick-add-compact" aria-label={`Add node after ${node.name}`} onPointerDown={(e) => e.stopPropagation()} onClick={() => insertAfter(node.id)}>
+                <Plus size={12} />
+              </button>
             </div>
           ))}
         </div>
@@ -652,20 +679,102 @@ export default function NetworkAutomationEditor() {
                     <div className="ai-node-banner">
                       <span className="ai-node-badge"><Sparkles size={16} /></span>
                       <div>
-                        <strong>AI message composer</strong>
-                        <small>Turns raw network events into an administrator-ready message.</small>
+                        <strong>AI provider</strong>
+                        <small>Connect Gemini, Groq, OpenAI, Anthropic, Mistral or a custom endpoint.</small>
                       </div>
                     </div>
+
                     <div className="field">
-                      <label>AI provider</label>
-                      <select value={aiProvider} onChange={(e) => {
-                        setAiProvider(e.target.value);
-                        setNodes((cur) => cur.map((n) => n.id === selected.id ? { ...n, config: { ...n.config, model: e.target.value.toLowerCase() } } : n));
-                      }}>
+                      <label>Provider</label>
+                      <select
+                        value={aiProvider}
+                        onChange={(e) => {
+                          const provider = e.target.value;
+                          setAiProvider(provider);
+                          setAiKeyState("");
+                          setNodes((cur) => cur.map((n) => n.id === selected.id
+                            ? { ...n, config: { ...n.config, provider, model: aiModels[provider] ?? "" } }
+                            : n
+                          ));
+                        }}
+                      >
                         <option>Gemini</option>
+                        <option>Groq</option>
                         <option>OpenAI</option>
+                        <option>Anthropic</option>
+                        <option>Mistral</option>
+                        <option>Custom</option>
                       </select>
                     </div>
+
+                    <div className="ai-credential-card">
+                      <div className="ai-credential-head">
+                        <div className="ai-provider-mark"><Sparkles size={18} /></div>
+                        <div>
+                          <strong>{aiProvider} API connection</strong>
+                          <small>API keys are represented in the editor; production secrets should be stored server-side.</small>
+                        </div>
+                      </div>
+
+                      <label className="ai-secret-label">
+                        API key
+                        <div className="ai-secret-input">
+                          <input
+                            type="password"
+                            value={aiKeys[aiProvider] ?? ""}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setAiKeys((cur) => ({ ...cur, [aiProvider]: value }));
+                              setAiKeyState("");
+                              setNodes((cur) => cur.map((n) => n.id === selected.id
+                                ? { ...n, config: { ...n.config, provider: aiProvider, hasApiKey: value ? "true" : "false" } }
+                                : n
+                              ));
+                            }}
+                            placeholder={`Paste ${aiProvider} API key`}
+                            autoComplete="off"
+                          />
+                          <CheckCircle2 size={16} className={aiKeys[aiProvider] ? "credential-ok" : ""} />
+                        </div>
+                      </label>
+
+                      <label>
+                        Model
+                        <input
+                          value={aiModels[aiProvider] ?? ""}
+                          onChange={(e) => {
+                            const model = e.target.value;
+                            setAiModels((cur) => ({ ...cur, [aiProvider]: model }));
+                            setNodes((cur) => cur.map((n) => n.id === selected.id
+                              ? { ...n, config: { ...n.config, provider: aiProvider, model } }
+                              : n
+                            ));
+                          }}
+                          placeholder="Model name"
+                        />
+                      </label>
+
+                      {aiProvider === "Custom" && (
+                        <label>
+                          Base URL
+                          <input
+                            value={aiBaseUrls.Custom ?? ""}
+                            onChange={(e) => setAiBaseUrls({ Custom: e.target.value })}
+                            placeholder="https://your-ai-endpoint/v1"
+                          />
+                        </label>
+                      )}
+
+                      <button
+                        type="button"
+                        className="btn primary full"
+                        onClick={() => setAiKeyState(aiKeys[aiProvider] ? `${aiProvider} API key added to this node.` : "Add an API key before saving this AI connection.")}
+                      >
+                        {aiKeys[aiProvider] ? "API key added" : "Add API key"}
+                      </button>
+                      {aiKeyState && <small className="field-note">{aiKeyState}</small>}
+                    </div>
+
                     <div className="field">
                       <label>Message instruction</label>
                       <textarea
@@ -673,16 +782,21 @@ export default function NetworkAutomationEditor() {
                         value={aiInstruction}
                         onChange={(e) => {
                           setAiInstruction(e.target.value);
-                          setNodes((cur) => cur.map((n) => n.id === selected.id ? { ...n, config: { ...n.config, instruction: e.target.value } } : n));
+                          setNodes((cur) => cur.map((n) => n.id === selected.id
+                            ? { ...n, config: { ...n.config, instruction: e.target.value } }
+                            : n
+                          ));
                         }}
                       />
                     </div>
+
                     <div className="ai-fields">
                       <span><strong>deviceName</strong><small>affected node</small></span>
                       <span><strong>ipAddress</strong><small>network address</small></span>
                       <span><strong>severity</strong><small>fault level</small></span>
                       <span><strong>recommendation</strong><small>AI-generated action</small></span>
                     </div>
+
                     <div className="expr-hint ai-hint">
                       <Sparkles size={15} />
                       <div>The AI node receives the fault event and produces the message consumed by the Gmail node.</div>
@@ -877,7 +991,159 @@ export default function NetworkAutomationEditor() {
   }
 
   return (
-    <div className="app-shell">
+    <>
+      <style jsx global>{`
+        .wf-node-compact {
+          position: absolute;
+          background: transparent !important;
+          border: 0 !important;
+          box-shadow: none !important;
+          overflow: visible !important;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          cursor: grab;
+          z-index: 3;
+        }
+        .wf-node-compact:active { cursor: grabbing; }
+        .wf-node-orb {
+          position: relative;
+          width: 82px;
+          height: 82px;
+          border-radius: 999px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 2px solid rgba(255,255,255,.18);
+          background: var(--surface, rgba(15,23,42,.92));
+          box-shadow: 0 10px 28px rgba(0,0,0,.22), inset 0 0 0 1px rgba(255,255,255,.05);
+          transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+        }
+        .wf-node-compact:hover .wf-node-orb,
+        .wf-node-compact.selected .wf-node-orb {
+          transform: scale(1.06);
+          border-color: var(--primary, #2563eb);
+          box-shadow: 0 0 0 5px rgba(37,99,235,.12), 0 14px 32px rgba(0,0,0,.26);
+        }
+        .wf-node-icon {
+          width: auto !important;
+          height: auto !important;
+          background: transparent !important;
+          border: 0 !important;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .wf-node-compact .handle {
+          position: absolute;
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          border: 2px solid var(--background, #fff);
+          background: var(--primary, #2563eb);
+          z-index: 8;
+        }
+        .wf-node-compact .handle-in { left: -5px; top: 36px; }
+        .wf-node-compact .handle-out { right: -5px; top: 36px; }
+        .wf-node-label {
+          margin-top: 10px;
+          max-width: 112px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          text-align: center;
+          font-size: 11px;
+          font-weight: 700;
+          opacity: .78;
+          pointer-events: none;
+        }
+        .wf-node-hover-card {
+          position: absolute;
+          left: 50%;
+          bottom: calc(100% + 12px);
+          transform: translateX(-50%) translateY(5px);
+          width: 235px;
+          padding: 12px;
+          border: 1px solid rgba(148,163,184,.22);
+          border-radius: 12px;
+          background: var(--panel, rgba(15,23,42,.97));
+          box-shadow: 0 18px 45px rgba(0,0,0,.3);
+          opacity: 0;
+          visibility: hidden;
+          pointer-events: none;
+          transition: opacity .15s ease, transform .15s ease;
+          z-index: 50;
+        }
+        .wf-node-compact:hover .wf-node-hover-card {
+          opacity: 1;
+          visibility: visible;
+          transform: translateX(-50%) translateY(0);
+        }
+        .wf-node-hover-top { display: flex; gap: 9px; align-items: center; }
+        .wf-node-hover-icon {
+          width: 34px; height: 34px; border-radius: 9px;
+          display: grid; place-items: center;
+          background: rgba(37,99,235,.13);
+        }
+        .wf-node-hover-card strong, .wf-node-hover-card small { display: block; }
+        .wf-node-hover-card small { margin-top: 2px; opacity: .58; font-size: 10px; }
+        .wf-node-hover-card p { margin: 9px 0 0; font-size: 11px; line-height: 1.45; opacity: .76; }
+        .wf-node-hover-meta { display: block; margin-top: 8px; font-size: 10px; opacity: .65; }
+        .node-delete-compact {
+          position: absolute !important;
+          top: 2px;
+          right: 7px;
+          opacity: 0;
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          display: grid;
+          place-items: center;
+          z-index: 20;
+        }
+        .wf-node-compact:hover .node-delete-compact,
+        .wf-node-compact.selected .node-delete-compact { opacity: .75; }
+        .quick-add-compact {
+          position: absolute !important;
+          right: -7px;
+          bottom: 19px;
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          z-index: 20;
+        }
+        .wf-node-pulse {
+          position: absolute;
+          inset: -7px;
+          border-radius: 50%;
+          border: 2px solid var(--primary, #2563eb);
+          animation: network-node-pulse 1.35s ease-out infinite;
+        }
+        @keyframes network-node-pulse {
+          0% { transform: scale(.92); opacity: .75; }
+          100% { transform: scale(1.18); opacity: 0; }
+        }
+        .ai-credential-card {
+          margin: 12px 0 16px;
+          padding: 13px;
+          border: 1px solid rgba(148,163,184,.2);
+          border-radius: 12px;
+          background: rgba(127,127,127,.055);
+        }
+        .ai-credential-head { display: flex; gap: 10px; align-items: center; margin-bottom: 13px; }
+        .ai-provider-mark {
+          width: 36px; height: 36px; border-radius: 10px;
+          display: grid; place-items: center;
+          background: rgba(37,99,235,.13);
+        }
+        .ai-credential-head strong, .ai-credential-head small { display: block; }
+        .ai-credential-head small { margin-top: 3px; font-size: 10px; line-height: 1.35; opacity: .6; }
+        .ai-secret-label { display: block; }
+        .ai-secret-input { display: flex; align-items: center; gap: 7px; }
+        .ai-secret-input input { flex: 1; }
+        .credential-ok { opacity: .9; }
+      `}</style>
+      <div className="app-shell">
       <aside className="app-rail">
         <div className="rail-brand"><div className="softcape-logo">S</div></div>
         <nav className="rail-nav">
@@ -921,5 +1187,6 @@ export default function NetworkAutomationEditor() {
         {renderPage()}
       </main>
     </div>
+    </>
   );
 }
