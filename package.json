@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -12,7 +12,9 @@
     "db:generate:auth": "drizzle-kit generate --config=drizzle.config.ts",
     "db:migrate:auth": "drizzle-kit migrate --config=drizzle.config.ts",
     "db:generate:tenant": "drizzle-kit generate --config=drizzle.tenant.config.ts",
-    "db:migrate:tenant": "drizzle-kit migrate --config=drizzle.tenant.config.ts"
+    "db:migrate:tenant": "drizzle-kit migrate --config=drizzle.tenant.config.ts",
+    "db:generate:monitoring": "drizzle-kit generate --config=drizzle.monitoring.config.ts",
+    "db:migrate:monitoring": "drizzle-kit migrate --config=drizzle.monitoring.config.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

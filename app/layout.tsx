@@ -13,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Softcape | Automation control plane",
-  description: "Event-driven automation for teams, systems, and AI agents.",
+  title: "MUBAS NetWatch | Network fault detection & management",
+  description:
+    "Prototype network monitoring application for MUBAS: real-time status, automated fault detection, diagnosis, recommendations, and reporting.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
