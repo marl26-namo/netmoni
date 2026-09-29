@@ -674,36 +674,6 @@ export default function NetworkAutomationEditor() {
             );
           })}
 
-          <div className="wf-support-connection ai-support-line" aria-hidden="true" />
-          <button className="wf-support-node wf-support-ai" type="button" onClick={() => {
-            const aiNode = nodes.find((n) => n.name === "AI Message");
-            if (aiNode) {
-              openNodeInspector(aiNode.id);
-            }
-          }} title="Configure AI provider">
-            <span><Sparkles size={25} /></span>
-            <strong>{aiProvider}</strong>
-            <small>AI provider</small>
-          </button>
-
-          <div className="wf-support-connection smtp-support-line" aria-hidden="true" />
-          <button className="wf-support-node wf-support-mail" type="button" onClick={() => {
-            const mailNode = nodes.find((n) => n.name === "Send Gmail");
-            if (mailNode) {
-              openNodeInspector(mailNode.id);
-            }
-          }} title="Configure Gmail SMTP">
-            <span><Mail size={25} /></span>
-            <strong>Gmail SMTP</strong>
-            <small>Nodemailer</small>
-          </button>
-
-          <div className="wf-support-connection device-support-line" aria-hidden="true" />
-          <button className="wf-support-node wf-support-device" type="button" onClick={() => { setActiveSection("Devices"); setLeftOpen(true); setRightOpen(false); }} title="Open monitored devices">
-            <span><Network size={25} /></span>
-            <strong>Devices</strong>
-            <small>Network source</small>
-          </button>
         </div>
 
         {!leftOpen && <button className="reopen-library" onClick={() => setLeftOpen(true)} title="Show node library"><Network size={15} /> Nodes</button>}
@@ -1055,7 +1025,7 @@ export default function NetworkAutomationEditor() {
     const step = entryStage === "login" ? "01 / ACCESS" : entryStage === "organization" ? "02 / ORGANIZATION" : "03 / DATA CONNECTION";
     return (
       <main className="entry-shell">
-        <div className="entry-brand"><span className="softcape-logo">S</span><span>softcape</span></div>
+        <div className="entry-brand"><span className="netmoni-logo">N</span><span>netmoni</span></div>
         <div className="entry-frame">
           <div className="entry-aside">
             <span className="overline">NETWORK AUTOMATION</span>
@@ -1067,14 +1037,14 @@ export default function NetworkAutomationEditor() {
           <section className="entry-card">
             <span className="overline">{step}</span>
             {entryStage === "login" && <>
-              <h2>Welcome back</h2><p className="entry-lede">Sign in to your Softcape workspace.</p>
+              <h2>Welcome back</h2><p className="entry-lede">Sign in to your NetMoni workspace.</p>
               <form className="entry-form" onSubmit={login}>
                 <label>Email address<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required /></label>
                 <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" required /></label>
                 {entryError && <div className="entry-error">{entryError}</div>}
                 <button className="entry-submit" type="submit" disabled={entryBusy}>{entryBusy ? "Signing in..." : "Continue"}<span>{"->"}</span></button>
               </form>
-              <div className="entry-foot">New to Softcape? <button type="button" onClick={() => { setEntryStage("organization"); setEntryError(""); }}>Create an organization</button></div>
+              <div className="entry-foot">New to NetMoni? <button type="button" onClick={() => { setEntryStage("organization"); setEntryError(""); }}>Create an organization</button></div>
             </>}
             {entryStage === "organization" && <>
               <h2>Create your organization</h2><p className="entry-lede">Your organization is the boundary for members, workflows, credentials, and data.</p>
@@ -1092,7 +1062,7 @@ export default function NetworkAutomationEditor() {
               <button className="back-link" type="button" onClick={() => setEntryStage("login")}>Back to sign in</button>
             </>}
             {entryStage === "database" && <>
-              <h2>Connect your database</h2><p className="entry-lede">Softcape stores authentication centrally. Your workflows and organization data stay in this database.</p>
+              <h2>Connect your database</h2><p className="entry-lede">NetMoni stores authentication centrally. Your workflows and organization data stay in this database.</p>
               <form className="entry-form" onSubmit={connectOrganizationDatabase}>
                 <label>Organization database URL<input type="text" value={organizationDbUrl} onChange={(e) => setOrganizationDbUrl(e.target.value)} placeholder="file:./organization.db" required /></label>
                 <div className="database-choice"><strong>SQLite is ready to use</strong><span>Use <code>file:</code> for local SQLite, or enter a <code>postgres://</code> or <code>mysql://</code> connection.</span></div>
@@ -1264,48 +1234,6 @@ export default function NetworkAutomationEditor() {
           z-index: 20;
         }
 
-        .wf-support-node {
-          position: absolute;
-          width: 96px;
-          height: 96px;
-          border-radius: 50%;
-          border: 2px solid var(--border, rgba(148,163,184,.45));
-          background: var(--panel, #242424);
-          color: var(--foreground, currentColor);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 2px;
-          box-shadow: 0 10px 28px rgba(0,0,0,.18);
-          cursor: pointer;
-          z-index: 4;
-          transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
-        }
-        .wf-support-node:hover {
-          transform: translateY(-3px);
-          border-color: var(--primary, #2563eb);
-          box-shadow: 0 0 0 5px rgba(37,99,235,.10), 0 15px 30px rgba(0,0,0,.22);
-        }
-        .wf-support-node > span { display: grid; place-items: center; opacity: .92; }
-        .wf-support-node strong { font-size: 10px; font-weight: 700; }
-        .wf-support-node small { font-size: 9px; opacity: .55; }
-        .wf-support-ai { left: 800px; top: 345px; }
-        .wf-support-mail { left: 1110px; top: 345px; }
-        .wf-support-device { left: 105px; top: 345px; }
-        .wf-support-connection {
-          position: absolute;
-          height: 1px;
-          border-top: 2px dashed var(--muted-foreground, rgba(148,163,184,.48));
-          transform-origin: left center;
-          opacity: .7;
-          z-index: 1;
-          pointer-events: none;
-        }
-        .ai-support-line { width: 145px; left: 735px; top: 315px; transform: rotate(18deg); }
-        .smtp-support-line { width: 145px; left: 1038px; top: 315px; transform: rotate(20deg); }
-        .device-support-line { width: 105px; left: 160px; top: 315px; transform: rotate(-18deg); }
-
         .wf-node-pulse {
           position: absolute;
           inset: -8px;
@@ -1331,8 +1259,7 @@ export default function NetworkAutomationEditor() {
         .network-theme-light .canvas::before {
           opacity: .55;
         }
-        .network-theme-light .wf-node-surface,
-        .network-theme-light .wf-support-node {
+        .network-theme-light .wf-node-surface {
           box-shadow: 0 8px 24px rgba(15,23,42,.10), inset 0 0 0 1px rgba(255,255,255,.55);
         }
         .network-theme-light .wf-node-hover-card {
@@ -1629,9 +1556,7 @@ export default function NetworkAutomationEditor() {
 
         /* Workflow nodes + hover cards */
         .app-shell.network-theme-dark .wf-node-surface,
-        .app-shell.network-theme-light .wf-node-surface,
-        .app-shell.network-theme-dark .wf-support-node,
-        .app-shell.network-theme-light .wf-support-node {
+        .app-shell.network-theme-light .wf-node-surface {
           background: var(--network-surface-2) !important;
           border-color: var(--network-border-strong) !important;
           color: var(--network-text) !important;
@@ -1661,14 +1586,7 @@ export default function NetworkAutomationEditor() {
         .app-shell.network-theme-light .wf-node-hover-card p {
           color: var(--network-text-2) !important;
         }
-        .app-shell.network-theme-dark .wf-support-node small,
-        .app-shell.network-theme-light .wf-support-node small {
-          color: var(--network-muted) !important;
-        }
-        .app-shell.network-theme-dark .wf-support-connection,
-        .app-shell.network-theme-light .wf-support-connection {
-          border-color: var(--network-border-strong) !important;
-        }
+
 
         /* Dashboard pages: Overview, Devices, Alerts, Executions, Settings */
         .app-shell.network-theme-dark .section-panel,
@@ -1789,6 +1707,7 @@ export default function NetworkAutomationEditor() {
           font-size: 12px;
         }
         .reopen-library { display: inline-flex; align-items: center; gap: 7px; }
+        .wf-node-ports { display: none !important; }
 
         /* Theme button */
         .app-shell.network-theme-dark .theme-toggle,
@@ -1817,7 +1736,7 @@ export default function NetworkAutomationEditor() {
       <div className={`app-shell network-theme-${theme}`}>
       {uiNotice && <div className="ui-notice" role="status">{uiNotice}</div>}
       <aside className="app-rail">
-        <div className="rail-brand"><div className="softcape-logo">S</div></div>
+        <div className="rail-brand"><div className="netmoni-logo">N</div></div>
         <nav className="rail-nav">
           {([
             ["Overview", "overview"], ["Workflows", "workflow"], ["Executions", "execution"], ["Devices", "devices"], ["Alerts", "alerts"], ["Settings", "settings"],
