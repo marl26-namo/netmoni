@@ -122,6 +122,10 @@ function typeLabel(type: NodeType) {
   return type === "trigger" ? "Trigger" : type === "logic" ? "Logic" : "Action";
 }
 
+function nodeDimensions(node: WorkflowNode) {
+  return node.icon === "ai" ? { width: 260, height: 108 } : { width: 116, height: 116 };
+}
+
 export default function NetworkAutomationEditor() {
   /* ---------------- entry flow state: intentionally unchanged ---------------- */
   const [entryStage, setEntryStage] = useState<EntryStage>("login");
@@ -147,7 +151,11 @@ export default function NetworkAutomationEditor() {
   const [search, setSearch] = useState("");
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const [settingsState, setSettingsState] = useState({ pollingInterval: "30", failureThreshold: "3" });
+  const [executionHistory, setExecutionHistory] = useState<Array<{ id: string; time: string; status: string; detail: string }>>([]);
+  const [uiNotice, setUiNotice] = useState("");
   const [activeSection, setActiveSection] = useState<EditorSection>("Workflows");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [workflowName, setWorkflowName] = useState("Network Fault Notification");
   const [saveState, setSaveState] = useState<"saved" | "saving">("saved");
   const [inspectorTab, setInspectorTab] = useState<"Parameters" | "Settings">("Parameters");
@@ -211,6 +219,16 @@ export default function NetworkAutomationEditor() {
   }, [currentUser.email]);
 
   useEffect(() => {
+    const savedTheme = window.localStorage.getItem("network-automation-theme");
+    if (savedTheme === "light" || savedTheme === "dark") setTheme(savedTheme);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.networkTheme = theme;
+    window.localStorage.setItem("network-automation-theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
     setSaveState("saving");
     const t = window.setTimeout(() => setSaveState("saved"), 700);
     return () => window.clearTimeout(t);
@@ -257,13 +275,31 @@ export default function NetworkAutomationEditor() {
     dragRef.current = { kind: "pan", startClientX: e.clientX, startClientY: e.clientY, startVx: viewport.x, startVy: viewport.y };
   };
 
+  const openNodeInspector = (id: string) => {
+    setSelectedNode(id);
+    setLeftOpen(true);
+    setRightOpen(true);
+    setActiveSection("Workflows");
+  };
+
+  const closeNodeInspector = () => {
+    setRightOpen(false);
+    // Closing a node configuration always restores the node library.
+    setLeftOpen(true);
+  };
+
+  const showNotice = (message: string) => {
+    setUiNotice(message);
+    window.setTimeout(() => setUiNotice(""), 2200);
+  };
+
   const onNodePointerDown = (e: ReactPointerEvent, node: WorkflowNode) => {
     if (e.button !== 0) return;
     e.stopPropagation();
     canvasRef.current?.setPointerCapture(e.pointerId);
     const p = toCanvas(e.clientX, e.clientY);
     dragRef.current = { kind: "node", id: node.id, offX: p.x - node.x, offY: p.y - node.y };
-    setSelectedNode(node.id);
+    openNodeInspector(node.id);
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -280,7 +316,8 @@ export default function NetworkAutomationEditor() {
   const addNode = (item: typeof nodeLibrary[number]) => {
     const id = crypto.randomUUID();
     const anchor = nodes[nodes.length - 1];
-    const x = anchor ? anchor.x + NODE_W + 90 : 250;
+    const anchorSize = anchor ? nodeDimensions(anchor) : { width: NODE_W, height: NODE_H };
+    const x = anchor ? anchor.x + anchorSize.width + 90 : 250;
     const y = anchor ? anchor.y : 180;
     const config: Record<string, string> =
       item.name === "Send Gmail"
@@ -291,21 +328,22 @@ export default function NetworkAutomationEditor() {
             ? { condition: "status == Offline OR severity == Critical" }
             : {};
     setNodes((cur) => [...cur, { id, type: item.type, name: item.name, description: item.description, icon: item.icon, x, y, config }]);
-    setSelectedNode(id);
+    openNodeInspector(id);
   };
 
   const insertAfter = (id: string) => {
     const index = nodes.findIndex((n) => n.id === id);
     if (index < 0) return;
     const anchor = nodes[index];
+    const anchorSize = nodeDimensions(anchor);
     const item = nodeLibrary.find((n) => n.type === "action")!;
     const newId = crypto.randomUUID();
     setNodes((cur) => {
-      const next = cur.map((n, i) => i > index ? { ...n, x: n.x + NODE_W + 90 } : n);
-      next.splice(index + 1, 0, { id: newId, type: item.type, name: item.name, description: item.description, icon: item.icon, x: anchor.x + NODE_W + 90, y: anchor.y });
+      const next = cur.map((n, i) => i > index ? { ...n, x: n.x + anchorSize.width + 90 } : n);
+      next.splice(index + 1, 0, { id: newId, type: item.type, name: item.name, description: item.description, icon: item.icon, x: anchor.x + anchorSize.width + 90, y: anchor.y });
       return next;
     });
-    setSelectedNode(newId);
+    openNodeInspector(newId);
   };
 
   const removeNode = (id: string) => {
@@ -335,17 +373,23 @@ export default function NetworkAutomationEditor() {
     if (!el || !nodes.length) return;
     const rect = el.getBoundingClientRect();
     const minX = Math.min(...nodes.map((n) => n.x)) - 100;
-    const maxX = Math.max(...nodes.map((n) => n.x + NODE_W)) + 100;
+    const maxX = Math.max(...nodes.map((n) => n.x + nodeDimensions(n).width)) + 100;
     const minY = Math.min(...nodes.map((n) => n.y)) - 100;
-    const maxY = Math.max(...nodes.map((n) => n.y + NODE_H)) + 100;
+    const maxY = Math.max(...nodes.map((n) => n.y + nodeDimensions(n).height)) + 100;
     const zoom = Math.min(1.4, Math.max(0.3, Math.min(rect.width / (maxX - minX), rect.height / (maxY - minY))));
     setViewport({ zoom, x: (rect.width - (maxX - minX) * zoom) / 2 - minX * zoom, y: (rect.height - (maxY - minY) * zoom) / 2 - minY * zoom });
   };
 
   const executeWorkflow = async () => {
     setRunning(true);
+    const executionId = crypto.randomUUID();
+    const startedAt = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    setExecutionHistory((cur) => [
+      { id: executionId, time: startedAt, status: "Running", detail: `${nodes.length} nodes · ${workflowName}` },
+      ...cur,
+    ].slice(0, 12));
     try {
-      await fetch("/api/events", {
+      const response = await fetch("/api/events", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -353,8 +397,14 @@ export default function NetworkAutomationEditor() {
           payload: { workflowId: "network-fault-notification", organizationId, nodes },
         }),
       });
+      if (!response.ok) throw new Error("Execution endpoint returned an error");
+      setExecutionHistory((cur) => cur.map((item) => item.id === executionId ? { ...item, status: "Success" } : item));
+      showNotice("Workflow test completed successfully.");
+    } catch {
+      setExecutionHistory((cur) => cur.map((item) => item.id === executionId ? { ...item, status: "Failed" } : item));
+      showNotice("Workflow was saved locally, but the execution API could not be reached.");
     } finally {
-      window.setTimeout(() => setRunning(false), 1600);
+      window.setTimeout(() => setRunning(false), 900);
     }
   };
 
@@ -479,7 +529,7 @@ export default function NetworkAutomationEditor() {
         <aside className="nodes-panel">
           <div className="nodes-panel-head">
             <strong>Network nodes</strong>
-            <button className="icon-btn" onClick={() => setLeftOpen(false)}>×</button>
+            <button className="icon-btn" onClick={() => setLeftOpen(false)} title="Hide node library"><X size={16} /></button>
           </div>
           <div className="nodes-search">
             <span>⌕</span>
@@ -508,7 +558,7 @@ export default function NetworkAutomationEditor() {
                       y: anchor ? anchor.y : 180,
                       config: { deviceName: device.name, ipAddress: device.ip, deviceType: device.type }
                     }]);
-                    setSelectedNode(id);
+                    openNodeInspector(id);
                   }}
                 >
                   <span className={`device-library-icon ${device.status.toLowerCase()}`}>
@@ -560,7 +610,9 @@ export default function NetworkAutomationEditor() {
           <svg className="edges-layer">
             {nodes.slice(0, -1).map((node, i) => {
               const next = nodes[i + 1];
-              const d = edgePath(node.x + NODE_W, node.y + NODE_H / 2, next.x, next.y + NODE_H / 2);
+              const size = nodeDimensions(node);
+              const nextSize = nodeDimensions(next);
+              const d = edgePath(node.x + size.width, node.y + size.height / 2, next.x, next.y + nextSize.height / 2);
               return (
                 <g key={node.id}>
                   <path d={d} className={`edge-path ${running ? "running" : ""}`} />
@@ -570,42 +622,91 @@ export default function NetworkAutomationEditor() {
             })}
           </svg>
 
-          {nodes.map((node) => (
-            <div
-              key={node.id}
-              className={`wf-node wf-node-compact type-${node.type} ${selectedNode === node.id ? "selected" : ""} ${running ? "running" : ""}`}
-              style={{ left: node.x, top: node.y, width: NODE_W, height: NODE_H }}
-              onPointerDown={(e) => onNodePointerDown(e, node)}
-              title={`${node.name} — ${node.description}`}
-              aria-label={`${node.name}. ${node.description}`}
-            >
-              <span className="handle handle-in" />
-              <div className="wf-node-orb">
-                <span className={`wf-node-icon type-${node.type}`}><NodeGlyph icon={node.icon} size={30} /></span>
-                {running && <span className="wf-node-pulse" />}
-              </div>
-              <div className="wf-node-hover-card">
-                <div className="wf-node-hover-top">
-                  <span className="wf-node-hover-icon"><NodeGlyph icon={node.icon} size={18} /></span>
-                  <div><strong>{node.name}</strong><small>{typeLabel(node.type)} node</small></div>
+          {nodes.map((node) => {
+            const wide = node.icon === "ai";
+            const { width: nodeWidth, height: nodeHeight } = nodeDimensions(node);
+            return (
+              <div
+                key={node.id}
+                className={`wf-node wf-node-compact ${wide ? "wf-node-agent" : "wf-node-card"} type-${node.type} ${selectedNode === node.id ? "selected" : ""} ${running ? "running" : ""}`}
+                style={{ left: node.x, top: node.y, width: nodeWidth, height: nodeHeight }}
+                onPointerDown={(e) => onNodePointerDown(e, node)}
+                title={`${node.name} — ${node.description}`}
+                aria-label={`${node.name}. ${node.description}`}
+              >
+                <span className="handle handle-in" />
+                <div className="wf-node-surface">
+                  <span className={`wf-node-icon type-${node.type}`}><NodeGlyph icon={node.icon} size={wide ? 30 : 34} /></span>
+                  {wide && (
+                    <div className="wf-node-agent-copy">
+                      <strong>{node.name}</strong>
+                      <small>AI-assisted network diagnosis</small>
+                    </div>
+                  )}
+                  {running && <span className="wf-node-pulse" />}
                 </div>
-                <p>{node.description}</p>
-                {node.name === "Send Gmail" && <span className="wf-node-hover-meta">Google SMTP · Nodemailer</span>}
-                {node.name === "AI Message" && <span className="wf-node-hover-meta">AI provider · API key</span>}
+                {!wide && <div className="wf-node-label">{node.name}</div>}
+                {wide && (
+                  <div className="wf-node-ports">
+                    <span>AI Provider</span>
+                    <span>Tools</span>
+                  </div>
+                )}
+
+                <div className="wf-node-hover-card">
+                  <div className="wf-node-hover-top">
+                    <span className="wf-node-hover-icon"><NodeGlyph icon={node.icon} size={18} /></span>
+                    <div><strong>{node.name}</strong><small>{typeLabel(node.type)} node</small></div>
+                  </div>
+                  <p>{node.description}</p>
+                  {node.name === "Send Gmail" && <span className="wf-node-hover-meta">Google SMTP · Nodemailer</span>}
+                  {node.name === "AI Message" && <span className="wf-node-hover-meta">AI provider · API key</span>}
+                </div>
+
+                <button className="node-delete node-delete-compact" aria-label={`Delete ${node.name}`} onPointerDown={(e) => e.stopPropagation()} onClick={() => removeNode(node.id)}>
+                  <X size={12} />
+                </button>
+                <span className="handle handle-out" />
+                <button className="quick-add quick-add-compact" aria-label={`Add node after ${node.name}`} onPointerDown={(e) => e.stopPropagation()} onClick={() => insertAfter(node.id)}>
+                  <Plus size={12} />
+                </button>
               </div>
-              <span className="wf-node-label">{node.name}</span>
-              <button className="node-delete node-delete-compact" aria-label={`Delete ${node.name}`} onPointerDown={(e) => e.stopPropagation()} onClick={() => removeNode(node.id)}>
-                <X size={12} />
-              </button>
-              <span className="handle handle-out" />
-              <button className="quick-add quick-add-compact" aria-label={`Add node after ${node.name}`} onPointerDown={(e) => e.stopPropagation()} onClick={() => insertAfter(node.id)}>
-                <Plus size={12} />
-              </button>
-            </div>
-          ))}
+            );
+          })}
+
+          <div className="wf-support-connection ai-support-line" aria-hidden="true" />
+          <button className="wf-support-node wf-support-ai" type="button" onClick={() => {
+            const aiNode = nodes.find((n) => n.name === "AI Message");
+            if (aiNode) {
+              openNodeInspector(aiNode.id);
+            }
+          }} title="Configure AI provider">
+            <span><Sparkles size={25} /></span>
+            <strong>{aiProvider}</strong>
+            <small>AI provider</small>
+          </button>
+
+          <div className="wf-support-connection smtp-support-line" aria-hidden="true" />
+          <button className="wf-support-node wf-support-mail" type="button" onClick={() => {
+            const mailNode = nodes.find((n) => n.name === "Send Gmail");
+            if (mailNode) {
+              openNodeInspector(mailNode.id);
+            }
+          }} title="Configure Gmail SMTP">
+            <span><Mail size={25} /></span>
+            <strong>Gmail SMTP</strong>
+            <small>Nodemailer</small>
+          </button>
+
+          <div className="wf-support-connection device-support-line" aria-hidden="true" />
+          <button className="wf-support-node wf-support-device" type="button" onClick={() => { setActiveSection("Devices"); setLeftOpen(true); setRightOpen(false); }} title="Open monitored devices">
+            <span><Network size={25} /></span>
+            <strong>Devices</strong>
+            <small>Network source</small>
+          </button>
         </div>
 
-        {!leftOpen && <button className="reopen-library" onClick={() => setLeftOpen(true)}>☰ Nodes</button>}
+        {!leftOpen && <button className="reopen-library" onClick={() => setLeftOpen(true)} title="Show node library"><Network size={15} /> Nodes</button>}
         <div className="canvas-workflow-badge"><span className="canvas-live-dot" /> Live network workflow</div>
         <div className="canvas-controls">
           <button onClick={() => zoomAtCenter(1.2)}>+</button>
@@ -632,7 +733,7 @@ export default function NetworkAutomationEditor() {
               />
               <small>{typeLabel(selected.type)} node</small>
             </div>
-            <button className="icon-btn" onClick={() => setRightOpen(false)}><X size={17} /></button>
+            <button className="icon-btn" onClick={closeNodeInspector} title="Close node configuration"><X size={17} /></button>
           </div>
 
           <div className="inspector-tabs">
@@ -644,20 +745,26 @@ export default function NetworkAutomationEditor() {
           <div className="inspector-body">
             {inspectorTab === "Parameters" ? (
               <>
-                {selected.name === "Network Fault Detected" && (
+                {selected.type === "trigger" && (
                   <div className="field">
                     <label>Trigger event</label>
-                    <select defaultValue="fault">
+                    <select
+                      value={selected.config?.event ?? "fault"}
+                      onChange={(e) => setNodes((cur) => cur.map((n) => n.id === selected.id ? { ...n, config: { ...n.config, event: e.target.value } } : n))}
+                    >
                       <option value="fault">Device failure detected</option>
-                      <option>Device status changed</option>
-                      <option>Packet loss threshold exceeded</option>
-                      <option>Response time threshold exceeded</option>
+                      <option value="status">Device status changed</option>
+                      <option value="packet-loss">Packet loss threshold exceeded</option>
+                      <option value="response-time">Response time threshold exceeded</option>
                     </select>
                     <label>Minimum severity</label>
-                    <select defaultValue="critical">
+                    <select
+                      value={selected.config?.severity ?? "critical"}
+                      onChange={(e) => setNodes((cur) => cur.map((n) => n.id === selected.id ? { ...n, config: { ...n.config, severity: e.target.value } } : n))}
+                    >
                       <option value="critical">Critical</option>
-                      <option>Warning</option>
-                      <option>Any</option>
+                      <option value="warning">Warning</option>
+                      <option value="any">Any</option>
                     </select>
                   </div>
                 )}
@@ -846,6 +953,10 @@ export default function NetworkAutomationEditor() {
               </div>
             )}
           </div>
+          <div className="inspector-footer">
+            <button type="button" className="btn ghost" onClick={closeNodeInspector}>Cancel / close</button>
+            <button type="button" className="btn primary" onClick={() => { setSaveState("saving"); window.setTimeout(() => setSaveState("saved"), 500); showNotice(`${selected.name} configuration saved.`); }}>Save node</button>
+          </div>
         </aside>
       )}
     </div>
@@ -908,7 +1019,12 @@ export default function NetworkAutomationEditor() {
         <span className="overline">AUTOMATION / EXECUTIONS</span><h1>Workflow executions</h1>
         <p>Monitor each network event as it moves through detection, condition checks and notification dispatch.</p>
         <div className="dashboard-integration-grid">
-          {["Network Fault Detected", "Check Fault Severity", "Send Fault Email"].map((step, i) => <article className="dashboard-integration-card" key={step}><div className="dashboard-integration-icon">{String(i + 1).padStart(2, "0")}</div><div><strong>{step}</strong><small>{step === "Send Gmail" ? "Google SMTP / Nodemailer" : step === "AI Message" ? "AI message generation" : "Network automation"}</small><p>{step === "Send Gmail" ? "Administrator email dispatch node ready." : step === "AI Message" ? "Generates a clear fault notification." : "Waiting for network event."}</p></div></article>)}
+          {executionHistory.length ? executionHistory.map((run, i) => (
+            <article className="dashboard-integration-card" key={run.id}>
+              <div className="dashboard-integration-icon">{String(i + 1).padStart(2, "0")}</div>
+              <div><strong>{run.status} · {run.time}</strong><small>{run.detail}</small><p>Network Fault → Check Severity → AI Message → Send Gmail</p></div>
+            </article>
+          )) : <article className="dashboard-integration-card"><div className="dashboard-integration-icon">—</div><div><strong>No executions yet</strong><small>Run Test workflow from the header.</small><p>Your workflow test history will appear here.</p></div></article>}
         </div>
       </div></section>;
     }
@@ -918,9 +1034,10 @@ export default function NetworkAutomationEditor() {
         <span className="overline">NETWORK / SETTINGS</span><h1>Monitoring and notification settings</h1>
         <p>Configure thresholds used by network events and the notification workflow.</p>
         <div className="credential-form">
-          <label>Polling interval<select defaultValue="30"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label>
-          <label>Failure threshold<select defaultValue="3"><option value="2">2 missed responses</option><option value="3">3 missed responses</option><option value="5">5 missed responses</option></select></label>
-          <label>Default notification workflow<input value="Network Fault Notification" readOnly /></label>
+          <label>Polling interval<select value={settingsState.pollingInterval} onChange={(e) => setSettingsState((v) => ({ ...v, pollingInterval: e.target.value }))}><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label>
+          <label>Failure threshold<select value={settingsState.failureThreshold} onChange={(e) => setSettingsState((v) => ({ ...v, failureThreshold: e.target.value }))}><option value="2">2 missed responses</option><option value="3">3 missed responses</option><option value="5">5 missed responses</option></select></label>
+          <label>Default notification workflow<input value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} /></label>
+          <button className="btn primary" type="button" onClick={() => showNotice("Monitoring settings saved.")}>Save monitoring settings</button>
           <div className="database-choice"><strong>Google SMTP / Nodemailer</strong><span>The workflow sends the AI-generated message to the authenticated administrator Gmail. Google App Passwords and AI API keys must be stored server-side.</span></div>
         </div>
       </div></section>;
@@ -1004,75 +1121,108 @@ export default function NetworkAutomationEditor() {
           align-items: center;
           cursor: grab;
           z-index: 3;
+          user-select: none;
         }
         .wf-node-compact:active { cursor: grabbing; }
-        .wf-node-orb {
+
+        .wf-node-surface {
           position: relative;
-          width: 82px;
-          height: 82px;
-          border-radius: 999px;
+          width: 100%;
+          height: 100%;
+          border: 2px solid var(--border, rgba(148,163,184,.45));
+          background: var(--panel, #242424);
+          box-shadow: 0 10px 26px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,255,255,.025);
           display: flex;
           align-items: center;
           justify-content: center;
-          border: 2px solid rgba(255,255,255,.18);
-          background: var(--surface, rgba(15,23,42,.92));
-          box-shadow: 0 10px 28px rgba(0,0,0,.22), inset 0 0 0 1px rgba(255,255,255,.05);
-          transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+          transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;
         }
-        .wf-node-compact:hover .wf-node-orb,
-        .wf-node-compact.selected .wf-node-orb {
-          transform: scale(1.06);
+        .wf-node-card .wf-node-surface {
+          border-radius: 12px 12px 18px 18px;
+        }
+        .wf-node-agent .wf-node-surface {
+          border-radius: 10px;
+          justify-content: flex-start;
+          padding: 0 28px;
+          gap: 18px;
+        }
+        .wf-node-compact:hover .wf-node-surface,
+        .wf-node-compact.selected .wf-node-surface {
+          transform: translateY(-2px);
           border-color: var(--primary, #2563eb);
-          box-shadow: 0 0 0 5px rgba(37,99,235,.12), 0 14px 32px rgba(0,0,0,.26);
+          box-shadow: 0 0 0 5px rgba(37,99,235,.10), 0 16px 34px rgba(0,0,0,.24);
         }
         .wf-node-icon {
-          width: auto !important;
-          height: auto !important;
+          width: 58px !important;
+          height: 58px !important;
+          border-radius: 12px;
           background: transparent !important;
           border: 0 !important;
           display: flex;
           align-items: center;
           justify-content: center;
+          color: var(--foreground, currentColor);
+        }
+        .wf-node-card.type-trigger .wf-node-icon { color: #14b8a6; }
+        .wf-node-card.type-logic .wf-node-icon { color: #22c55e; }
+        .wf-node-card.type-action .wf-node-icon { color: #38bdf8; }
+        .wf-node-agent .wf-node-icon { color: var(--foreground, #fff); flex: 0 0 auto; }
+        .wf-node-agent-copy strong, .wf-node-agent-copy small { display: block; }
+        .wf-node-agent-copy strong { font-size: 16px; letter-spacing: -.01em; }
+        .wf-node-agent-copy small { margin-top: 5px; opacity: .55; font-size: 11px; }
+        .wf-node-ports {
+          position: absolute;
+          left: 34px;
+          right: 34px;
+          bottom: -20px;
+          display: flex;
+          justify-content: space-between;
+          font-size: 10px;
+          color: var(--muted-foreground, #94a3b8);
+          pointer-events: none;
         }
         .wf-node-compact .handle {
           position: absolute;
-          width: 10px;
-          height: 10px;
+          width: 11px;
+          height: 11px;
           border-radius: 50%;
           border: 2px solid var(--background, #fff);
-          background: var(--primary, #2563eb);
+          background: var(--muted-foreground, #94a3b8);
           z-index: 8;
         }
-        .wf-node-compact .handle-in { left: -5px; top: 36px; }
-        .wf-node-compact .handle-out { right: -5px; top: 36px; }
+        .wf-node-compact .handle-in { left: -5px; top: calc(50% - 5px); }
+        .wf-node-compact .handle-out { right: -5px; top: calc(50% - 5px); }
+        .wf-node-agent .handle-in { left: -5px; }
+        .wf-node-agent .handle-out { right: -5px; }
+
         .wf-node-label {
           margin-top: 10px;
-          max-width: 112px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
+          max-width: 130px;
           text-align: center;
-          font-size: 11px;
-          font-weight: 700;
-          opacity: .78;
+          font-size: 12px;
+          font-weight: 650;
+          line-height: 1.25;
+          color: var(--foreground, currentColor);
           pointer-events: none;
         }
+
         .wf-node-hover-card {
           position: absolute;
           left: 50%;
-          bottom: calc(100% + 12px);
+          bottom: calc(100% + 15px);
           transform: translateX(-50%) translateY(5px);
-          width: 235px;
+          width: 245px;
           padding: 12px;
-          border: 1px solid rgba(148,163,184,.22);
+          border: 1px solid var(--border, rgba(148,163,184,.25));
           border-radius: 12px;
           background: var(--panel, rgba(15,23,42,.97));
-          box-shadow: 0 18px 45px rgba(0,0,0,.3);
+          color: var(--foreground, #fff);
+          box-shadow: 0 18px 45px rgba(0,0,0,.30);
           opacity: 0;
           visibility: hidden;
           pointer-events: none;
           transition: opacity .15s ease, transform .15s ease;
-          z-index: 50;
+          z-index: 60;
         }
         .wf-node-compact:hover .wf-node-hover-card {
           opacity: 1;
@@ -1089,10 +1239,11 @@ export default function NetworkAutomationEditor() {
         .wf-node-hover-card small { margin-top: 2px; opacity: .58; font-size: 10px; }
         .wf-node-hover-card p { margin: 9px 0 0; font-size: 11px; line-height: 1.45; opacity: .76; }
         .wf-node-hover-meta { display: block; margin-top: 8px; font-size: 10px; opacity: .65; }
+
         .node-delete-compact {
           position: absolute !important;
-          top: 2px;
-          right: 7px;
+          top: -9px;
+          right: -9px;
           opacity: 0;
           width: 22px;
           height: 22px;
@@ -1105,24 +1256,90 @@ export default function NetworkAutomationEditor() {
         .wf-node-compact.selected .node-delete-compact { opacity: .75; }
         .quick-add-compact {
           position: absolute !important;
-          right: -7px;
-          bottom: 19px;
+          right: -11px;
+          bottom: -11px;
           width: 22px;
           height: 22px;
           border-radius: 50%;
           z-index: 20;
         }
+
+        .wf-support-node {
+          position: absolute;
+          width: 96px;
+          height: 96px;
+          border-radius: 50%;
+          border: 2px solid var(--border, rgba(148,163,184,.45));
+          background: var(--panel, #242424);
+          color: var(--foreground, currentColor);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 2px;
+          box-shadow: 0 10px 28px rgba(0,0,0,.18);
+          cursor: pointer;
+          z-index: 4;
+          transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+        }
+        .wf-support-node:hover {
+          transform: translateY(-3px);
+          border-color: var(--primary, #2563eb);
+          box-shadow: 0 0 0 5px rgba(37,99,235,.10), 0 15px 30px rgba(0,0,0,.22);
+        }
+        .wf-support-node > span { display: grid; place-items: center; opacity: .92; }
+        .wf-support-node strong { font-size: 10px; font-weight: 700; }
+        .wf-support-node small { font-size: 9px; opacity: .55; }
+        .wf-support-ai { left: 800px; top: 345px; }
+        .wf-support-mail { left: 1110px; top: 345px; }
+        .wf-support-device { left: 105px; top: 345px; }
+        .wf-support-connection {
+          position: absolute;
+          height: 1px;
+          border-top: 2px dashed var(--muted-foreground, rgba(148,163,184,.48));
+          transform-origin: left center;
+          opacity: .7;
+          z-index: 1;
+          pointer-events: none;
+        }
+        .ai-support-line { width: 145px; left: 735px; top: 315px; transform: rotate(18deg); }
+        .smtp-support-line { width: 145px; left: 1038px; top: 315px; transform: rotate(20deg); }
+        .device-support-line { width: 105px; left: 160px; top: 315px; transform: rotate(-18deg); }
+
         .wf-node-pulse {
           position: absolute;
-          inset: -7px;
-          border-radius: 50%;
+          inset: -8px;
+          border-radius: 10px;
           border: 2px solid var(--primary, #2563eb);
           animation: network-node-pulse 1.35s ease-out infinite;
+          pointer-events: none;
         }
+        .wf-node-card .wf-node-pulse { border-radius: 14px; }
+        .wf-node-agent .wf-node-pulse { border-radius: 12px; }
         @keyframes network-node-pulse {
-          0% { transform: scale(.92); opacity: .75; }
-          100% { transform: scale(1.18); opacity: 0; }
+          0% { transform: scale(.97); opacity: .72; }
+          100% { transform: scale(1.04); opacity: 0; }
         }
+
+        .network-theme-dark { color-scheme: dark; }
+        .network-theme-light { color-scheme: light; }
+        .network-theme-light .canvas {
+          background-color: var(--background, #f7f8fa);
+          background-image: radial-gradient(circle, rgba(100,116,139,.25) 1px, transparent 1px);
+          background-size: 24px 24px;
+        }
+        .network-theme-light .canvas::before {
+          opacity: .55;
+        }
+        .network-theme-light .wf-node-surface,
+        .network-theme-light .wf-support-node {
+          box-shadow: 0 8px 24px rgba(15,23,42,.10), inset 0 0 0 1px rgba(255,255,255,.55);
+        }
+        .network-theme-light .wf-node-hover-card {
+          box-shadow: 0 18px 45px rgba(15,23,42,.16);
+        }
+        .theme-toggle { min-width: 82px; justify-content: center; gap: 6px; }
+
         .ai-credential-card {
           margin: 12px 0 16px;
           padding: 13px;
@@ -1142,8 +1359,463 @@ export default function NetworkAutomationEditor() {
         .ai-secret-input { display: flex; align-items: center; gap: 7px; }
         .ai-secret-input input { flex: 1; }
         .credential-ok { opacity: .9; }
+        /* ================================================================
+           WHOLE DASHBOARD THEME
+           The mode switch applies to the complete authenticated workspace:
+           rail, header, tabs, panels, forms, canvas, inspector, modals,
+           cards, controls and workflow nodes.
+        ================================================================ */
+        .app-shell.network-theme-dark {
+          --network-bg: #111315;
+          --network-surface: #17191c;
+          --network-surface-2: #1d2024;
+          --network-surface-3: #24282d;
+          --network-border: #30353c;
+          --network-border-strong: #424954;
+          --network-text: #f3f5f7;
+          --network-text-2: #c3c8cf;
+          --network-muted: #8d949d;
+          --network-canvas: #111315;
+          --network-canvas-dot: rgba(255,255,255,.14);
+          --network-input: #121417;
+          --network-hover: rgba(255,255,255,.055);
+          --network-active: rgba(37,99,235,.13);
+          --network-shadow: 0 16px 45px rgba(0,0,0,.30);
+          --network-shadow-soft: 0 8px 25px rgba(0,0,0,.18);
+          color-scheme: dark;
+        }
+
+        .app-shell.network-theme-light {
+          --network-bg: #f5f7fa;
+          --network-surface: #ffffff;
+          --network-surface-2: #f8fafc;
+          --network-surface-3: #eef2f6;
+          --network-border: #d8dee7;
+          --network-border-strong: #b9c2ce;
+          --network-text: #17202a;
+          --network-text-2: #4b5563;
+          --network-muted: #6b7280;
+          --network-canvas: #f7f9fb;
+          --network-canvas-dot: rgba(71,85,105,.22);
+          --network-input: #ffffff;
+          --network-hover: rgba(15,23,42,.045);
+          --network-active: rgba(37,99,235,.09);
+          --network-shadow: 0 16px 45px rgba(15,23,42,.12);
+          --network-shadow-soft: 0 8px 25px rgba(15,23,42,.08);
+          color-scheme: light;
+        }
+
+        .app-shell.network-theme-dark,
+        .app-shell.network-theme-light {
+          background: var(--network-bg) !important;
+          color: var(--network-text) !important;
+          min-height: 100vh;
+          transition: background-color .2s ease, color .2s ease;
+        }
+
+        .app-shell.network-theme-dark *,
+        .app-shell.network-theme-light * {
+          scrollbar-color: var(--network-border-strong) transparent;
+        }
+
+        /* Left navigation */
+        .app-shell.network-theme-dark .app-rail,
+        .app-shell.network-theme-light .app-rail {
+          background: var(--network-surface) !important;
+          border-right: 1px solid var(--network-border) !important;
+          color: var(--network-text) !important;
+          transition: background-color .2s ease, border-color .2s ease;
+        }
+        .app-shell.network-theme-dark .rail-item,
+        .app-shell.network-theme-light .rail-item {
+          color: var(--network-muted) !important;
+          border-color: transparent !important;
+          background: transparent !important;
+        }
+        .app-shell.network-theme-dark .rail-item:hover,
+        .app-shell.network-theme-light .rail-item:hover {
+          color: var(--network-text) !important;
+          background: var(--network-hover) !important;
+        }
+        .app-shell.network-theme-dark .rail-item.active,
+        .app-shell.network-theme-light .rail-item.active {
+          color: var(--primary, #2563eb) !important;
+          background: var(--network-active) !important;
+        }
+        .app-shell.network-theme-dark .rail-user,
+        .app-shell.network-theme-light .rail-user {
+          background: var(--network-surface-3) !important;
+          border: 1px solid var(--network-border) !important;
+          color: var(--network-text) !important;
+        }
+
+        /* Main header + tabs */
+        .app-shell.network-theme-dark .editor-main,
+        .app-shell.network-theme-light .editor-main {
+          background: var(--network-bg) !important;
+          color: var(--network-text) !important;
+        }
+        .app-shell.network-theme-dark .editor-header,
+        .app-shell.network-theme-light .editor-header {
+          background: var(--network-surface) !important;
+          border-bottom: 1px solid var(--network-border) !important;
+          color: var(--network-text) !important;
+        }
+        .app-shell.network-theme-dark .editor-tabs,
+        .app-shell.network-theme-light .editor-tabs {
+          background: var(--network-surface) !important;
+          border-bottom: 1px solid var(--network-border) !important;
+        }
+        .app-shell.network-theme-dark .editor-tab,
+        .app-shell.network-theme-light .editor-tab {
+          color: var(--network-muted) !important;
+          background: transparent !important;
+          border-color: transparent !important;
+        }
+        .app-shell.network-theme-dark .editor-tab:hover,
+        .app-shell.network-theme-light .editor-tab:hover {
+          color: var(--network-text) !important;
+        }
+        .app-shell.network-theme-dark .editor-tab.active,
+        .app-shell.network-theme-light .editor-tab.active {
+          color: var(--network-text) !important;
+          border-bottom-color: var(--primary, #2563eb) !important;
+        }
+        .app-shell.network-theme-dark .crumb,
+        .app-shell.network-theme-light .crumb,
+        .app-shell.network-theme-dark .save-state,
+        .app-shell.network-theme-light .save-state {
+          color: var(--network-muted) !important;
+        }
+        .app-shell.network-theme-dark .wf-name-input,
+        .app-shell.network-theme-light .wf-name-input {
+          color: var(--network-text) !important;
+          background: transparent !important;
+        }
+
+        /* Generic controls */
+        .app-shell.network-theme-dark .btn.ghost,
+        .app-shell.network-theme-light .btn.ghost,
+        .app-shell.network-theme-dark .icon-btn,
+        .app-shell.network-theme-light .icon-btn,
+        .app-shell.network-theme-dark .reopen-library,
+        .app-shell.network-theme-light .reopen-library {
+          color: var(--network-text-2) !important;
+          background: var(--network-surface) !important;
+          border-color: var(--network-border) !important;
+        }
+        .app-shell.network-theme-dark .btn.ghost:hover,
+        .app-shell.network-theme-light .btn.ghost:hover,
+        .app-shell.network-theme-dark .icon-btn:hover,
+        .app-shell.network-theme-light .icon-btn:hover,
+        .app-shell.network-theme-dark .reopen-library:hover,
+        .app-shell.network-theme-light .reopen-library:hover {
+          color: var(--network-text) !important;
+          background: var(--network-hover) !important;
+          border-color: var(--network-border-strong) !important;
+        }
+        .app-shell.network-theme-dark .btn.primary,
+        .app-shell.network-theme-light .btn.primary {
+          color: #fff !important;
+        }
+
+        /* Workflow workspace */
+        .app-shell.network-theme-dark .editor-body,
+        .app-shell.network-theme-light .editor-body {
+          background: var(--network-bg) !important;
+        }
+        .app-shell.network-theme-dark .nodes-panel,
+        .app-shell.network-theme-light .nodes-panel,
+        .app-shell.network-theme-dark .inspector {
+          background: var(--network-surface) !important;
+          border-color: var(--network-border) !important;
+          color: var(--network-text) !important;
+        }
+        .app-shell.network-theme-light .inspector {
+          background: var(--network-surface) !important;
+          border-color: var(--network-border) !important;
+          color: var(--network-text) !important;
+        }
+        .app-shell.network-theme-dark .nodes-panel-head,
+        .app-shell.network-theme-light .nodes-panel-head,
+        .app-shell.network-theme-dark .inspector-head,
+        .app-shell.network-theme-light .inspector-head {
+          border-color: var(--network-border) !important;
+          background: var(--network-surface) !important;
+        }
+        .app-shell.network-theme-dark .nodes-panel-body,
+        .app-shell.network-theme-light .nodes-panel-body,
+        .app-shell.network-theme-dark .inspector-body,
+        .app-shell.network-theme-light .inspector-body {
+          color: var(--network-text) !important;
+        }
+        .app-shell.network-theme-dark .nodes-search input,
+        .app-shell.network-theme-light .nodes-search input,
+        .app-shell.network-theme-dark .field input,
+        .app-shell.network-theme-light .field input,
+        .app-shell.network-theme-dark .field select,
+        .app-shell.network-theme-light .field select,
+        .app-shell.network-theme-dark .field textarea,
+        .app-shell.network-theme-light .field textarea {
+          color: var(--network-text) !important;
+          background: var(--network-input) !important;
+          border-color: var(--network-border) !important;
+        }
+        .app-shell.network-theme-dark input::placeholder,
+        .app-shell.network-theme-light input::placeholder,
+        .app-shell.network-theme-dark textarea::placeholder,
+        .app-shell.network-theme-light textarea::placeholder {
+          color: var(--network-muted) !important;
+        }
+        .app-shell.network-theme-dark .node-item,
+        .app-shell.network-theme-light .node-item {
+          color: var(--network-text-2) !important;
+          background: transparent !important;
+          border-color: transparent !important;
+        }
+        .app-shell.network-theme-dark .node-item:hover,
+        .app-shell.network-theme-light .node-item:hover {
+          color: var(--network-text) !important;
+          background: var(--network-hover) !important;
+        }
+        .app-shell.network-theme-dark .nodes-section-title,
+        .app-shell.network-theme-light .nodes-section-title,
+        .app-shell.network-theme-dark .field-note,
+        .app-shell.network-theme-light .field-note,
+        .app-shell.network-theme-dark .expr-hint,
+        .app-shell.network-theme-light .expr-hint {
+          color: var(--network-muted) !important;
+        }
+        .app-shell.network-theme-dark .inspector-tabs,
+        .app-shell.network-theme-light .inspector-tabs {
+          border-color: var(--network-border) !important;
+        }
+        .app-shell.network-theme-dark .inspector-tabs button,
+        .app-shell.network-theme-light .inspector-tabs button {
+          color: var(--network-muted) !important;
+          background: transparent !important;
+        }
+        .app-shell.network-theme-dark .inspector-tabs button.active,
+        .app-shell.network-theme-light .inspector-tabs button.active {
+          color: var(--network-text) !important;
+        }
+
+        /* Canvas */
+        .app-shell.network-theme-dark .canvas,
+        .app-shell.network-theme-light .canvas {
+          background-color: var(--network-canvas) !important;
+          background-image: radial-gradient(circle, var(--network-canvas-dot) 1px, transparent 1px) !important;
+          background-size: 24px 24px !important;
+        }
+        .app-shell.network-theme-dark .canvas::before,
+        .app-shell.network-theme-light .canvas::before {
+          opacity: .55;
+        }
+        .app-shell.network-theme-dark .canvas-controls,
+        .app-shell.network-theme-light .canvas-controls,
+        .app-shell.network-theme-dark .canvas-workflow-badge,
+        .app-shell.network-theme-light .canvas-workflow-badge,
+        .app-shell.network-theme-dark .canvas-hint,
+        .app-shell.network-theme-light .canvas-hint {
+          color: var(--network-text-2) !important;
+          background: var(--network-surface) !important;
+          border-color: var(--network-border) !important;
+          box-shadow: var(--network-shadow-soft) !important;
+        }
+        .app-shell.network-theme-dark .zoom-readout,
+        .app-shell.network-theme-light .zoom-readout {
+          color: var(--network-text) !important;
+        }
+
+        /* Workflow nodes + hover cards */
+        .app-shell.network-theme-dark .wf-node-surface,
+        .app-shell.network-theme-light .wf-node-surface,
+        .app-shell.network-theme-dark .wf-support-node,
+        .app-shell.network-theme-light .wf-support-node {
+          background: var(--network-surface-2) !important;
+          border-color: var(--network-border-strong) !important;
+          color: var(--network-text) !important;
+        }
+        .app-shell.network-theme-dark .wf-node-compact.selected .wf-node-surface,
+        .app-shell.network-theme-light .wf-node-compact.selected .wf-node-surface {
+          border-color: var(--primary, #2563eb) !important;
+        }
+        .app-shell.network-theme-dark .wf-node-hover-card,
+        .app-shell.network-theme-light .wf-node-hover-card {
+          background: var(--network-surface) !important;
+          border-color: var(--network-border) !important;
+          color: var(--network-text) !important;
+          box-shadow: var(--network-shadow) !important;
+        }
+        .app-shell.network-theme-dark .wf-node-label,
+        .app-shell.network-theme-light .wf-node-label,
+        .app-shell.network-theme-dark .wf-node-agent-copy strong,
+        .app-shell.network-theme-light .wf-node-agent-copy strong {
+          color: var(--network-text) !important;
+        }
+        .app-shell.network-theme-dark .wf-node-agent-copy small,
+        .app-shell.network-theme-light .wf-node-agent-copy small,
+        .app-shell.network-theme-dark .wf-node-hover-card small,
+        .app-shell.network-theme-light .wf-node-hover-card small,
+        .app-shell.network-theme-dark .wf-node-hover-card p,
+        .app-shell.network-theme-light .wf-node-hover-card p {
+          color: var(--network-text-2) !important;
+        }
+        .app-shell.network-theme-dark .wf-support-node small,
+        .app-shell.network-theme-light .wf-support-node small {
+          color: var(--network-muted) !important;
+        }
+        .app-shell.network-theme-dark .wf-support-connection,
+        .app-shell.network-theme-light .wf-support-connection {
+          border-color: var(--network-border-strong) !important;
+        }
+
+        /* Dashboard pages: Overview, Devices, Alerts, Executions, Settings */
+        .app-shell.network-theme-dark .section-panel,
+        .app-shell.network-theme-light .section-panel {
+          background: var(--network-bg) !important;
+          color: var(--network-text) !important;
+        }
+        .app-shell.network-theme-dark .section-panel-inner,
+        .app-shell.network-theme-light .section-panel-inner {
+          color: var(--network-text) !important;
+        }
+        .app-shell.network-theme-dark .section-panel-inner h1,
+        .app-shell.network-theme-light .section-panel-inner h1,
+        .app-shell.network-theme-dark .section-panel-inner h2,
+        .app-shell.network-theme-light .section-panel-inner h2,
+        .app-shell.network-theme-dark .section-panel-inner strong,
+        .app-shell.network-theme-light .section-panel-inner strong {
+          color: var(--network-text) !important;
+        }
+        .app-shell.network-theme-dark .section-panel-inner p,
+        .app-shell.network-theme-light .section-panel-inner p,
+        .app-shell.network-theme-dark .section-panel-inner small,
+        .app-shell.network-theme-light .section-panel-inner small {
+          color: var(--network-text-2) !important;
+        }
+        .app-shell.network-theme-dark .device-registry,
+        .app-shell.network-theme-light .device-registry,
+        .app-shell.network-theme-dark .device-row,
+        .app-shell.network-theme-light .device-row,
+        .app-shell.network-theme-dark .dashboard-integration-card,
+        .app-shell.network-theme-light .dashboard-integration-card {
+          background: var(--network-surface) !important;
+          border-color: var(--network-border) !important;
+          color: var(--network-text) !important;
+          box-shadow: none;
+        }
+        .app-shell.network-theme-dark .device-row:hover,
+        .app-shell.network-theme-light .device-row:hover,
+        .app-shell.network-theme-dark .dashboard-integration-card:hover,
+        .app-shell.network-theme-light .dashboard-integration-card:hover {
+          background: var(--network-surface-2) !important;
+          border-color: var(--network-border-strong) !important;
+        }
+        .app-shell.network-theme-dark .device-meta span,
+        .app-shell.network-theme-light .device-meta span,
+        .app-shell.network-theme-dark .device-meta strong,
+        .app-shell.network-theme-light .device-meta strong {
+          color: var(--network-text-2) !important;
+        }
+        .app-shell.network-theme-dark .device-main strong,
+        .app-shell.network-theme-light .device-main strong,
+        .app-shell.network-theme-dark .device-main small,
+        .app-shell.network-theme-light .device-main small {
+          color: var(--network-text) !important;
+        }
+
+        /* AI/API credential area */
+        .app-shell.network-theme-dark .ai-node-banner,
+        .app-shell.network-theme-light .ai-node-banner,
+        .app-shell.network-theme-dark .ai-credential-card,
+        .app-shell.network-theme-light .ai-credential-card,
+        .app-shell.network-theme-dark .database-choice,
+        .app-shell.network-theme-light .database-choice {
+          background: var(--network-surface-2) !important;
+          border-color: var(--network-border) !important;
+          color: var(--network-text) !important;
+        }
+        .app-shell.network-theme-dark .ai-credential-card span,
+        .app-shell.network-theme-light .ai-credential-card span,
+        .app-shell.network-theme-dark .database-choice span,
+        .app-shell.network-theme-light .database-choice span {
+          color: var(--network-text-2) !important;
+        }
+
+        /* Modals */
+        .app-shell.network-theme-dark .modal-backdrop,
+        .app-shell.network-theme-light .modal-backdrop {
+          background: rgba(2,6,23,.55) !important;
+          backdrop-filter: blur(4px);
+        }
+        .app-shell.network-theme-dark .device-modal,
+        .app-shell.network-theme-light .device-modal {
+          background: var(--network-surface) !important;
+          color: var(--network-text) !important;
+          border-color: var(--network-border) !important;
+          box-shadow: var(--network-shadow) !important;
+        }
+        .app-shell.network-theme-dark .device-modal input,
+        .app-shell.network-theme-light .device-modal input,
+        .app-shell.network-theme-dark .device-modal select,
+        .app-shell.network-theme-light .device-modal select {
+          background: var(--network-input) !important;
+          color: var(--network-text) !important;
+          border-color: var(--network-border) !important;
+        }
+
+        .inspector-footer {
+          display: flex;
+          gap: 8px;
+          padding: 12px 14px;
+          border-top: 1px solid var(--network-border, rgba(148,163,184,.2));
+          background: var(--network-surface, #17191c);
+          position: sticky;
+          bottom: 0;
+        }
+        .inspector-footer .btn { flex: 1; justify-content: center; }
+        .ui-notice {
+          position: fixed;
+          right: 22px;
+          bottom: 22px;
+          z-index: 200;
+          padding: 11px 14px;
+          border: 1px solid var(--network-border, rgba(148,163,184,.25));
+          border-radius: 10px;
+          background: var(--network-surface, #17191c);
+          color: var(--network-text, #f3f5f7);
+          box-shadow: var(--network-shadow, 0 16px 45px rgba(0,0,0,.3));
+          font-size: 12px;
+        }
+        .reopen-library { display: inline-flex; align-items: center; gap: 7px; }
+
+        /* Theme button */
+        .app-shell.network-theme-dark .theme-toggle,
+        .app-shell.network-theme-light .theme-toggle {
+          min-width: 88px;
+        }
+
+        /* Make the transition apply to the complete dashboard without touching auth */
+        .app-shell.network-theme-dark,
+        .app-shell.network-theme-light,
+        .app-shell.network-theme-dark .app-rail,
+        .app-shell.network-theme-light .app-rail,
+        .app-shell.network-theme-dark .editor-header,
+        .app-shell.network-theme-light .editor-header,
+        .app-shell.network-theme-dark .editor-tabs,
+        .app-shell.network-theme-light .editor-tabs,
+        .app-shell.network-theme-dark .nodes-panel,
+        .app-shell.network-theme-light .nodes-panel,
+        .app-shell.network-theme-dark .inspector,
+        .app-shell.network-theme-light .inspector,
+        .app-shell.network-theme-dark .section-panel,
+        .app-shell.network-theme-light .section-panel {
+          transition: background-color .2s ease, border-color .2s ease, color .2s ease;
+        }
       `}</style>
-      <div className="app-shell">
+      <div className={`app-shell network-theme-${theme}`}>
+      {uiNotice && <div className="ui-notice" role="status">{uiNotice}</div>}
       <aside className="app-rail">
         <div className="rail-brand"><div className="softcape-logo">S</div></div>
         <nav className="rail-nav">
@@ -1170,6 +1842,10 @@ export default function NetworkAutomationEditor() {
             </div>
           </div>
           <div className="header-actions">
+            <button className="btn ghost theme-toggle" onClick={() => setTheme((value) => value === "dark" ? "light" : "dark")} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
+              {theme === "dark" ? <Globe2 size={15} /> : <Zap size={15} />}
+              {theme === "dark" ? "Light" : "Dark"}
+            </button>
             <button className="btn ghost" onClick={() => setActiveSection("Devices")}>Devices</button>
             <button className={`btn ghost ${published ? "is-published" : ""}`} onClick={() => setPublished(!published)}>{published ? "● Published" : "Publish"}</button>
             <button className="btn primary" onClick={executeWorkflow} disabled={running}><span className="play-icon">{running ? <Activity size={15} /> : <Play size={14} fill="currentColor" />}</span>{running ? "Executing…" : "Test workflow"}</button>
