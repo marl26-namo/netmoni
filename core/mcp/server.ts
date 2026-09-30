@@ -9,10 +9,10 @@ export type JsonRpcRequest = { jsonrpc?: string; id?: string | number | null; me
 type JsonRpcResponse = { jsonrpc: "2.0"; id: string | number | null; result?: unknown; error?: { code: number; message: string; data?: unknown } };
 
 const toolDefinitions = [
-  { name: "softcape_list_workflows", description: "List workflows available in this Softcape workspace.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-  { name: "softcape_emit_event", description: "Publish an event and run every enabled workflow subscribed to it.", inputSchema: { type: "object", properties: { type: { type: "string", description: "Event name, for example customer.created" }, payload: { type: "object", additionalProperties: true }, source: { type: "string" } }, required: ["type"], additionalProperties: false } },
-  { name: "softcape_list_executions", description: "List workflow execution history, optionally filtered by workflow id.", inputSchema: { type: "object", properties: { workflowId: { type: "string" } }, additionalProperties: false } },
-  { name: "softcape_list_capabilities", description: "List the business capabilities registered with the automation engine.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "netmoni_list_workflows", description: "List workflows available in this NetMoni workspace.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "netmoni_emit_event", description: "Publish an event and run every enabled workflow subscribed to it.", inputSchema: { type: "object", properties: { type: { type: "string", description: "Event name, for example customer.created" }, payload: { type: "object", additionalProperties: true }, source: { type: "string" } }, required: ["type"], additionalProperties: false } },
+  { name: "netmoni_list_executions", description: "List workflow execution history, optionally filtered by workflow id.", inputSchema: { type: "object", properties: { workflowId: { type: "string" } }, additionalProperties: false } },
+  { name: "netmoni_list_capabilities", description: "List the business capabilities registered with the automation engine.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
 ];
 
 function response(id: JsonRpcRequest["id"], result: unknown): JsonRpcResponse { return { jsonrpc: "2.0", id: id ?? null, result }; }
@@ -24,7 +24,7 @@ export async function handleMcpRequest(request: JsonRpcRequest): Promise<JsonRpc
   if (request.id === undefined && request.method.startsWith("notifications/")) return null;
 
   if (request.method === "initialize") {
-    return response(request.id, { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softcape", version: "0.1.0" }, instructions: "Use Softcape tools to inspect workflows and emit business events." });
+    return response(request.id, { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "netmoni", version: "0.1.0" }, instructions: "Use NetMoni tools to inspect workflows and emit business events." });
   }
   if (request.method === "notifications/initialized") return null;
   if (request.method === "ping") return response(request.id, {});
@@ -35,13 +35,13 @@ export async function handleMcpRequest(request: JsonRpcRequest): Promise<JsonRpc
   const name = typeof params.name === "string" ? params.name : "";
   const argumentsValue = params.arguments && typeof params.arguments === "object" ? params.arguments as Record<string, unknown> : {};
   try {
-    if (name === "softcape_list_workflows") return response(request.id, textResult(workflowRepository.list()));
-    if (name === "softcape_list_capabilities") return response(request.id, textResult(capabilityRegistry.list()));
-    if (name === "softcape_list_executions") {
+    if (name === "netmoni_list_workflows") return response(request.id, textResult(await workflowRepository.list()));
+    if (name === "netmoni_list_capabilities") return response(request.id, textResult(capabilityRegistry.list()));
+    if (name === "netmoni_list_executions") {
       const workflowId = typeof argumentsValue.workflowId === "string" ? argumentsValue.workflowId : undefined;
       return response(request.id, textResult(automationEngine.executions.list(workflowId)));
     }
-    if (name === "softcape_emit_event") {
+    if (name === "netmoni_emit_event") {
       const type = typeof argumentsValue.type === "string" ? argumentsValue.type : "";
       if (!type) return response(request.id, textResult({ error: "arguments.type is required" }, true));
       const payload = argumentsValue.payload && typeof argumentsValue.payload === "object" ? argumentsValue.payload as Record<string, unknown> : {};

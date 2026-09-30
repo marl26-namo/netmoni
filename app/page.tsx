@@ -16,7 +16,7 @@ type WorkflowNode = {
   config?: Record<string, string>;
 };
 
-type EntryStage = "login" | "organization" | "database" | "editor";
+type EntryStage = "login" | "organization" | "editor";
 type EditorSection = "Overview" | "Workflows" | "Executions" | "Devices" | "Alerts" | "Settings";
 type Viewport = { x: number; y: number; zoom: number };
 
@@ -145,7 +145,6 @@ export default function NetworkAutomationEditor() {
   const [confirmOwnerPassword, setConfirmOwnerPassword] = useState("");
   const [organizationId, setOrganizationId] = useState("");
   const [currentUser, setCurrentUser] = useState({ name: "", email: "" });
-  const [organizationDbUrl, setOrganizationDbUrl] = useState("file:./organization.db");
   const [entryError, setEntryError] = useState("");
   const [entryBusy, setEntryBusy] = useState(false);
 
@@ -605,25 +604,6 @@ export default function NetworkAutomationEditor() {
     }
     setOrganizationId(data.organization.id);
     if (data.owner) setCurrentUser(data.owner);
-    setEntryStage("database");
-    setEntryBusy(false);
-  };
-
-  const connectOrganizationDatabase = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setEntryBusy(true);
-    setEntryError("");
-    const response = await fetch(`/api/organizations/${organizationId}/database`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ url: organizationDbUrl }),
-    });
-    const data = (await response.json()) as { error?: string };
-    if (!response.ok) {
-      setEntryError(data.error ?? "We could not connect to that database.");
-      setEntryBusy(false);
-      return;
-    }
     setEntryStage("editor");
     setEntryBusy(false);
   };
@@ -1174,7 +1154,7 @@ export default function NetworkAutomationEditor() {
 
   /* ---------------- entry screens ---------------- */
   if (entryStage !== "editor") {
-    const step = entryStage === "login" ? "01 / ACCESS" : entryStage === "organization" ? "02 / ORGANIZATION" : "03 / DATA CONNECTION";
+    const step = entryStage === "login" ? "01 / ACCESS" : "02 / ORGANIZATION";
     return (
       <main className="entry-shell">
         <div className="entry-brand"><span className="netmoni-logo">N</span><span>netmoni</span></div>
@@ -1184,7 +1164,7 @@ export default function NetworkAutomationEditor() {
             <h1>Monitor the network. Automate the response.</h1>
             <p>Detect failures, evaluate fault conditions and dispatch notifications through workflow automation.</p>
             <div className="entry-aside-line" />
-            <small>Private by design. Your organization owns its data connections.</small>
+            <small>Private by design. Your organization data lives in one managed PostgreSQL database.</small>
           </div>
           <section className="entry-card">
             <span className="overline">{step}</span>
@@ -1212,16 +1192,6 @@ export default function NetworkAutomationEditor() {
                 <button className="entry-submit" type="submit" disabled={entryBusy}>{entryBusy ? "Creating owner account..." : "Create organization and owner"}<span>{"->"}</span></button>
               </form>
               <button className="back-link" type="button" onClick={() => setEntryStage("login")}>Back to sign in</button>
-            </>}
-            {entryStage === "database" && <>
-              <h2>Connect your database</h2><p className="entry-lede">NetMoni stores authentication centrally. Your workflows and organization data stay in this database.</p>
-              <form className="entry-form" onSubmit={connectOrganizationDatabase}>
-                <label>Organization database URL<input type="text" value={organizationDbUrl} onChange={(e) => setOrganizationDbUrl(e.target.value)} placeholder="file:./organization.db" required /></label>
-                <div className="database-choice"><strong>SQLite is ready to use</strong><span>Use <code>file:</code> for local SQLite, or enter a <code>postgres://</code> or <code>mysql://</code> connection.</span></div>
-                {entryError && <div className="entry-error">{entryError}</div>}
-                <button className="entry-submit" type="submit" disabled={entryBusy}>{entryBusy ? "Connecting..." : "Connect and open workspace"}<span>{"->"}</span></button>
-              </form>
-              <button className="back-link" type="button" onClick={() => setEntryStage("organization")}>Back to organization</button>
             </>}
           </section>
         </div>

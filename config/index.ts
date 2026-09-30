@@ -1,8 +1,9 @@
 export const config = {
-  appName: "Softcape",
-  authDatabase: process.env.AUTH_DATABASE_URL ?? "file:./softcape-auth.db",
-  database: process.env.AUTH_DATABASE_URL ?? "file:./softcape-auth.db",
-  databaseMode: process.env.AUTH_DATABASE_URL ? "byo-auth" : "embedded-auth-sqlite",
-  runtime: process.env.SOFTCAPE_RUNTIME ?? "local",
-  apiBaseUrl: process.env.SOFTCAPE_API_URL ?? "http://localhost:3000",
+  appName: "NetMoni",
+  /** Single PostgreSQL database — auth, tenancy, monitoring and workflow data. */
+  databaseUrl: process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/netmoni",
+  sessionCookieName: "netmoni_session",
+  sessionTtlMs: 86_400_000,
+  runtime: process.env.NETMONI_RUNTIME ?? "local",
+  apiBaseUrl: process.env.NETMONI_API_URL ?? "http://localhost:3000",
 };

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { synthesizeFaultMessage, type AiFaultContext } from "@/core/monitoring/ai";
-import { sessionWorkspaceId } from "@/auth/store";
+import { sessionWorkspace } from "@/auth/store";
 import { tenantMonitorStore } from "@/core/monitoring/store";
 import { alertSeverity, type AlertSeverity } from "@/core/monitoring/types";
 
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
       provider?: string;
       model?: string;
     };
-    const organizationId = sessionWorkspaceId(request);
+    const organizationId = await sessionWorkspace(request);
 
     let deviceContext: AiFaultContext["device"] = { name: body.deviceName ?? "Unknown device", ip: body.ipAddress ?? "0.0.0.0", type: "router", subnet: "", mac: "" };
     let checks: AiFaultContext["checks"] = [];

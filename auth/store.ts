@@ -1,22 +1,16 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { createHash } from "node:crypto";
-import BetterSqlite3 from "better-sqlite3";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { and, eq, gt } from "drizzle-orm";
+import { db } from "@/db/client";
 import { config } from "@/config";
+import {
+  organizationMembers,
+  organizations,
+  sessions,
+  users,
+} from "@/db/schema";
 
 export type AuthUser = { id: string; email: string; passwordHash: string; name: string; status: "active"; createdAt: string };
 export type OrganizationOwner = { id: string; name: string; createdAt: string; ownerUserId: string };
-
-const users = new Map<string, AuthUser>();
-const organizations = new Map<string, OrganizationOwner>();
-const sqliteAuth = config.authDatabase.startsWith("file:") ? new BetterSqlite3(config.authDatabase.replace(/^file:/, "")) : null;
-
-sqliteAuth?.exec(`
-  CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL);
-  CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
-  CREATE TABLE IF NOT EXISTS organizations (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
-  CREATE TABLE IF NOT EXISTS organization_members (organization_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member', PRIMARY KEY (organization_id, user_id));
-  CREATE TABLE IF NOT EXISTS organization_databases (organization_id TEXT PRIMARY KEY, url TEXT NOT NULL, configured_at TEXT NOT NULL);
-`);
 
 export function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
@@ -31,76 +25,138 @@ export function verifyPassword(password: string, storedHash: string) {
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-export function createOwner(input: { name: string; email: string; password: string; organizationId: string; organizationName: string }) {
+/** Creates the owner user + organization + membership in one transaction. */
+export async function createOwner(input: { name: string; email: string; password: string; organizationId: string; organizationName: string }) {
   const email = input.email.trim().toLowerCase();
-  if (usersByEmail(email)) throw new Error("An account with that email already exists");
-  const user: AuthUser = { id: `user-${randomBytes(8).toString("hex")}`, email, passwordHash: hashPassword(input.password), name: input.name.trim(), status: "active", createdAt: new Date().toISOString() };
-  const organization: OrganizationOwner = { id: input.organizationId, name: input.organizationName.trim(), createdAt: new Date().toISOString(), ownerUserId: user.id };
-  sqliteAuth?.prepare("INSERT INTO users (id, email, password_hash, name, status, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(user.id, user.email, user.passwordHash, user.name, user.status, user.createdAt);
-  sqliteAuth?.prepare("INSERT INTO organizations (id, name, created_at) VALUES (?, ?, ?)").run(organization.id, organization.name, organization.createdAt);
-  sqliteAuth?.prepare("INSERT INTO organization_members (organization_id, user_id, role) VALUES (?, ?, ?)").run(organization.id, user.id, "owner");
-  users.set(user.id, user);
-  organizations.set(organization.id, organization);
+  const existing = await usersByEmail(email);
+  if (existing) throw new Error("An account with that email already exists");
+
+  const user: AuthUser = {
+    id: `user-${randomBytes(8).toString("hex")}`,
+    email,
+    passwordHash: hashPassword(input.password),
+    name: input.name.trim(),
+    status: "active",
+    createdAt: new Date().toISOString(),
+  };
+  const organization: OrganizationOwner = {
+    id: input.organizationId,
+    name: input.organizationName.trim(),
+    createdAt: new Date().toISOString(),
+    ownerUserId: user.id,
+  };
+
+  await db().transaction(async (tx) => {
+    await tx.insert(users).values({
+      id: user.id,
+      email: user.email,
+      passwordHash: user.passwordHash,
+      name: user.name,
+      status: user.status,
+    });
+    await tx.insert(organizations).values({
+      id: organization.id,
+      name: organization.name,
+      ownerId: user.id,
+    });
+    await tx.insert(organizationMembers).values({
+      organizationId: organization.id,
+      userId: user.id,
+      role: "owner",
+    });
+  });
+
   return { user, organization };
 }
 
-function rowToUser(row: Record<string, string> | undefined): AuthUser | undefined {
+type UserRow = typeof users.$inferSelect;
+
+function rowToUser(row: UserRow | undefined): AuthUser | undefined {
   if (!row) return undefined;
-  return { id: row.id, email: row.email, passwordHash: row.password_hash, name: row.name, status: row.status as "active", createdAt: row.created_at };
+  return { id: row.id, email: row.email, passwordHash: row.passwordHash, name: row.name, status: "active", createdAt: row.createdAt.toISOString() };
 }
 
-export function usersByEmail(email: string) {
+export async function usersByEmail(email: string) {
   const normalized = email.trim().toLowerCase();
-  const stored = sqliteAuth?.prepare("SELECT id, email, password_hash, name, status, created_at FROM users WHERE email = ?").get(normalized) as Record<string, string> | undefined;
-  return rowToUser(stored) ?? [...users.values()].find((user) => user.email === normalized);
-}
-export function getUser(id: string) { return rowToUser(sqliteAuth?.prepare("SELECT id, email, password_hash, name, status, created_at FROM users WHERE id = ?").get(id) as Record<string, string> | undefined) ?? users.get(id); }
-export function getOrganization(id: string) { return organizations.get(id); }
-export function organizationForUser(userId: string) {
-  const stored = sqliteAuth?.prepare("SELECT organization_id FROM organization_members WHERE user_id = ? ORDER BY organization_id LIMIT 1").get(userId) as { organization_id: string } | undefined;
-  return stored?.organization_id;
-}
-export function organizationDetailsForUser(userId: string) {
-  const stored = sqliteAuth?.prepare("SELECT o.id, o.name FROM organizations o INNER JOIN organization_members m ON m.organization_id = o.id WHERE m.user_id = ? ORDER BY o.created_at LIMIT 1").get(userId) as { id: string; name: string } | undefined;
-  return stored ?? [...organizations.values()].find((organization) => organization.ownerUserId === userId);
+  const rows = await db().select().from(users).where(eq(users.email, normalized)).limit(1);
+  return rowToUser(rows[0]);
 }
 
-export function setOrganizationDatabaseUrl(organizationId: string, url: string) {
-  sqliteAuth?.prepare("INSERT INTO organization_databases (organization_id, url, configured_at) VALUES (?, ?, ?) ON CONFLICT(organization_id) DO UPDATE SET url = excluded.url, configured_at = excluded.configured_at").run(organizationId, url, new Date().toISOString());
+export async function getUser(id: string) {
+  const rows = await db().select().from(users).where(eq(users.id, id)).limit(1);
+  return rowToUser(rows[0]);
 }
 
-export function getOrganizationDatabaseUrl(organizationId: string) {
-  const row = sqliteAuth?.prepare("SELECT url FROM organization_databases WHERE organization_id = ?").get(organizationId) as { url: string } | undefined;
-  return row?.url;
+export async function getOrganization(id: string) {
+  const rows = await db().select().from(organizations).where(eq(organizations.id, id)).limit(1);
+  const row = rows[0];
+  if (!row) return undefined;
+  return { id: row.id, name: row.name, createdAt: row.createdAt.toISOString(), ownerUserId: row.ownerId } satisfies OrganizationOwner;
 }
 
-export function listConfiguredOrganizationIds(): string[] {
-  const rows = sqliteAuth?.prepare("SELECT organization_id FROM organization_databases").all() as Array<{ organization_id: string }> | undefined;
-  return (rows ?? []).map((row) => row.organization_id);
-}
-export function listUsers() {
-  const stored = sqliteAuth?.prepare("SELECT id, email, name, status, created_at FROM users ORDER BY created_at DESC").all() as Array<Record<string, string>> | undefined;
-  return stored?.map((user) => ({ id: user.id, email: user.email, name: user.name, status: user.status, createdAt: user.created_at })) ?? [...users.values()].map((user) => ({ id: user.id, email: user.email, name: user.name, status: user.status, createdAt: user.createdAt }));
+export async function organizationForUser(userId: string) {
+  const rows = await db()
+    .select({ organizationId: organizationMembers.organizationId })
+    .from(organizationMembers)
+    .where(eq(organizationMembers.userId, userId))
+    .limit(1);
+  return rows[0]?.organizationId;
 }
 
-export function createSession(userId: string, organizationId: string) {
+export async function organizationDetailsForUser(userId: string) {
+  const rows = await db()
+    .select({ id: organizations.id, name: organizations.name })
+    .from(organizationMembers)
+    .innerJoin(organizations, eq(organizations.id, organizationMembers.organizationId))
+    .where(eq(organizationMembers.userId, userId))
+    .limit(1);
+  return rows[0];
+}
+
+export async function listUsers() {
+  const rows = await db().select({ id: users.id, email: users.email, name: users.name, status: users.status, createdAt: users.createdAt }).from(users);
+  return rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() }));
+}
+
+export async function createSession(userId: string, organizationId: string) {
   const token = randomBytes(32).toString("hex");
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + 86_400_000).toISOString();
-  const session = { id: `session-${randomBytes(8).toString("hex")}`, userId, workspaceId: organizationId, role: "owner" as const, expiresAt };
-  sqliteAuth?.prepare("INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)").run(session.id, userId, createHash("sha256").update(token).digest("hex"), expiresAt, now.toISOString());
+  const expiresAt = new Date(now.getTime() + config.sessionTtlMs);
+  const session = { id: `session-${randomBytes(8).toString("hex")}`, userId, workspaceId: organizationId, role: "owner" as const, expiresAt: expiresAt.toISOString() };
+  await db().insert(sessions).values({
+    id: session.id,
+    userId,
+    tokenHash: sessionTokenHash(token),
+    expiresAt,
+  });
   return { token, session };
 }
 
-export function sessionFromToken(token: string) {
-  const row = sqliteAuth?.prepare("SELECT id, user_id, expires_at FROM sessions WHERE token_hash = ?").get(createHash("sha256").update(token).digest("hex")) as { id: string; user_id: string; expires_at: string } | undefined;
-  if (!row || new Date(row.expires_at) <= new Date()) return undefined;
-  return { userId: row.user_id, sessionId: row.id, expiresAt: row.expires_at };
+function sessionTokenHash(token: string) {
+  return createHash("sha256").update(token).digest("hex");
 }
 
-export function sessionWorkspaceId(request: Request): string {
-  const token = request.headers.get("cookie")?.match(/(?:^|; )softcape_session=([^;]+)/)?.[1];
-  const session = token ? sessionFromToken(token) : undefined;
+export async function sessionFromToken(token: string) {
+  const rows = await db()
+    .select({ id: sessions.id, userId: sessions.userId, expiresAt: sessions.expiresAt })
+    .from(sessions)
+    .where(and(eq(sessions.tokenHash, sessionTokenHash(token)), gt(sessions.expiresAt, new Date())))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return undefined;
+  return { userId: row.userId, sessionId: row.id, expiresAt: row.expiresAt.toISOString() };
+}
+
+/** Resolves the workspace (organization) id from the session cookie. */
+export async function sessionWorkspace(request: Request): Promise<string> {
+  const token = request.headers.get("cookie")?.match(/(?:^|; )netmoni_session=([^;]+)/)?.[1];
+  const session = token ? await sessionFromToken(token) : undefined;
   if (!session) return "local-workspace";
-  return organizationForUser(session.userId) ?? "local-workspace";
+  return (await organizationForUser(session.userId)) ?? "local-workspace";
+}
+
+/** Ensures monitoring defaults and the seeded fault-notification workflow exist for a fresh organization. */
+export async function ensureOrganizationDefaults(organizationId: string) {
+  // monitoringSettings row is created lazily by the monitoring store;
+  // nothing to pre-create today. Kept as an explicit hook for onboarding.
 }

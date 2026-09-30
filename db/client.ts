@@ -1,48 +1,40 @@
-import BetterSqlite3 from "better-sqlite3";
-import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
-import { drizzle as drizzlePostgres } from "drizzle-orm/node-postgres";
-import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { createPool } from "mysql2/promise";
 import { config } from "@/config";
-import * as authSqliteSchema from "@/db/schema/auth-sqlite";
-import * as authPostgresSchema from "@/db/schema/auth-postgres";
-import * as authMysqlSchema from "@/db/schema/auth-mysql";
-import * as tenantSqliteSchema from "@/db/schema/tenant-sqlite";
-import * as tenantPostgresSchema from "@/db/schema/tenant-postgres";
-import * as tenantMysqlSchema from "@/db/schema/tenant-mysql";
+import * as schema from "@/db/schema";
 
-export type DatabaseDialect = "postgres" | "mysql" | "sqlite";
-export type DatabaseScope = "auth" | "organization";
-export type DatabaseClient = { dialect: DatabaseDialect; scope: DatabaseScope; url: string; db: unknown; raw: RawConnection };
+export type NetMoniDatabase = ReturnType<typeof createDatabase>;
 
-export type RawConnection =
-  | { kind: "sqlite"; connection: BetterSqlite3.Database }
-  | { kind: "postgres"; pool: Pool }
-  | { kind: "mysql"; pool: ReturnType<typeof createPool> };
+let cachedDatabase: NetMoniDatabase | null = null;
 
-function dialectFor(url: string): DatabaseDialect {
-  if (url.startsWith("postgres://") || url.startsWith("postgresql://")) return "postgres";
-  if (url.startsWith("mysql://")) return "mysql";
-  return "sqlite";
+function createDatabase() {
+  const pool = new Pool({
+    connectionString: config.databaseUrl,
+    max: Number(process.env.DATABASE_POOL_MAX ?? 10),
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+  });
+  return { pool, db: drizzle(pool, { schema }) };
 }
 
-function sqlitePath(url: string) { return url.replace(/^file:/, "") || "./softcape.db"; }
-
-export function createDatabase(url = config.authDatabase, scope: DatabaseScope = "auth"): DatabaseClient {
-  const dialect = dialectFor(url);
-  if (dialect === "postgres") {
-    const pool = new Pool({ connectionString: url });
-    return { dialect, scope, url, db: drizzlePostgres(pool, { schema: scope === "auth" ? authPostgresSchema : tenantPostgresSchema }), raw: { kind: "postgres", pool } };
-  }
-  if (dialect === "mysql") {
-    const pool = createPool(url);
-    return { dialect, scope, url, db: drizzleMysql(pool, { mode: "default", schema: scope === "auth" ? authMysqlSchema : tenantMysqlSchema }), raw: { kind: "mysql", pool } };
-  }
-  const sqlite = new BetterSqlite3(sqlitePath(url));
-  return { dialect, scope, url, db: drizzleSqlite(sqlite, { schema: scope === "auth" ? authSqliteSchema : tenantSqliteSchema }), raw: { kind: "sqlite", connection: sqlite } };
+/**
+ * Shared Drizzle + node-postgres client for the single NetMoni database.
+ * The pool is created lazily on first access so importing this module never
+ * opens connections (safe for build-time imports).
+ */
+export function getDatabase(): NetMoniDatabase {
+  if (!cachedDatabase) cachedDatabase = createDatabase();
+  return cachedDatabase;
 }
 
-export const authDatabase = createDatabase(config.authDatabase, "auth");
-export const database = authDatabase;
-export function createOrganizationDatabase(url: string) { return createDatabase(url, "organization"); }
+/** Drizzle instance (schema-aware). */
+export function db() {
+  return getDatabase().db;
+}
+
+/** Raw pg pool — used by health checks and maintenance tooling. */
+export function pool() {
+  return getDatabase().pool;
+}
+
+export const database = { get db() { return db(); }, get pool() { return pool(); }, get dialect() { return "postgres" as const; } };
