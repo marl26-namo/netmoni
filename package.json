@@ -7,12 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:generate": "npm run db:generate:auth && npm run db:generate:tenant",
-    "db:migrate": "npm run db:migrate:auth && npm run db:migrate:tenant",
+    "db:generate": "npm run db:generate:auth && npm run db:generate:tenant && npm run db:generate:monitoring",
+    "db:migrate": "npm run db:migrate:auth && npm run db:migrate:tenant && npm run db:migrate:monitoring",
     "db:generate:auth": "drizzle-kit generate --config=drizzle.config.ts",
     "db:migrate:auth": "drizzle-kit migrate --config=drizzle.config.ts",
     "db:generate:tenant": "drizzle-kit generate --config=drizzle.tenant.config.ts",
-    "db:migrate:tenant": "drizzle-kit migrate --config=drizzle.tenant.config.ts"
+    "db:migrate:tenant": "drizzle-kit migrate --config=drizzle.tenant.config.ts",
+    "db:generate:monitoring": "drizzle-kit generate --config=drizzle.monitoring.config.ts",
+    "db:migrate:monitoring": "drizzle-kit migrate --config=drizzle.monitoring.config.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

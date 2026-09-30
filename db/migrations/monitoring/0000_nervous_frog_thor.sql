@@ -1,0 +1,81 @@
+CREATE TABLE `monitoring_alerts` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`device_id` text NOT NULL,
+	`device_name` text NOT NULL,
+	`ip_address` text NOT NULL,
+	`severity` text NOT NULL,
+	`status` text DEFAULT 'open' NOT NULL,
+	`title` text NOT NULL,
+	`summary` text NOT NULL,
+	`evidence` text,
+	`recommendation` text NOT NULL,
+	`message` text NOT NULL,
+	`probes_failed` text,
+	`latency_ms` real,
+	`packet_loss_pct` real,
+	`email_dispatched` integer DEFAULT false NOT NULL,
+	`email_recipients` text,
+	`email_error` text,
+	`created_at` text NOT NULL,
+	`resolved_at` text
+);
+--> statement-breakpoint
+CREATE TABLE `monitoring_devices` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`name` text NOT NULL,
+	`ip_address` text NOT NULL,
+	`subnet` text,
+	`mac` text,
+	`kind` text DEFAULT 'router' NOT NULL,
+	`location` text,
+	`status` text DEFAULT 'unknown' NOT NULL,
+	`response_time_ms` real,
+	`packet_loss_pct` real,
+	`last_seen_at` text,
+	`last_checked_at` text,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `monitoring_runs` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`started_at` text NOT NULL,
+	`finished_at` text,
+	`duration_ms` real,
+	`triggered_by` text DEFAULT 'manual' NOT NULL,
+	`devices_checked` integer DEFAULT 0 NOT NULL,
+	`devices_online` integer DEFAULT 0 NOT NULL,
+	`devices_warning` integer DEFAULT 0 NOT NULL,
+	`devices_offline` integer DEFAULT 0 NOT NULL,
+	`results` text,
+	`alerts_created` integer DEFAULT 0 NOT NULL,
+	`emails_dispatched` integer DEFAULT 0 NOT NULL,
+	`status` text DEFAULT 'completed' NOT NULL,
+	`error` text
+);
+--> statement-breakpoint
+CREATE TABLE `monitoring_settings` (
+	`organization_id` text PRIMARY KEY NOT NULL,
+	`polling_interval_seconds` integer DEFAULT 30 NOT NULL,
+	`failure_threshold` integer DEFAULT 3 NOT NULL,
+	`warning_latency_ms` integer DEFAULT 300 NOT NULL,
+	`packet_loss_threshold_pct` real DEFAULT 5 NOT NULL,
+	`snmp_community` text DEFAULT '' NOT NULL,
+	`tcp_ports` text DEFAULT '22,80,443' NOT NULL,
+	`tcp_ports_enabled` integer DEFAULT false NOT NULL,
+	`http_urls` text,
+	`dns_hostname` text,
+	`dns_server` text,
+	`ai_provider` text DEFAULT 'gemini' NOT NULL,
+	`ai_model` text DEFAULT 'gemini-2.5-flash' NOT NULL,
+	`admin_emails` text DEFAULT '' NOT NULL,
+	`smtp_host` text DEFAULT 'smtp.gmail.com' NOT NULL,
+	`smtp_port` integer DEFAULT 465 NOT NULL,
+	`smtp_secure` integer DEFAULT true NOT NULL,
+	`smtp_user` text,
+	`smtp_from` text,
+	`updated_at` text NOT NULL
+);
