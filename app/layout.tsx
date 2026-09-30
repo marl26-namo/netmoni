@@ -13,11 +13,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Softcape | Automation control plane",
-  description: "Event-driven automation for teams, systems, and AI agents.",
+  title: "NetMoni | Network monitoring & fault automation",
+  description: "Monitor devices with ping, SNMP, TCP, HTTP and DNS probes. AI-composed fault emails dispatch administrators to the fault location.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
