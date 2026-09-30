@@ -9,10 +9,14 @@ class MonitorScheduler {
     if (this.running) return;
     this.running = true;
     try {
-      const { listConfiguredOrganizationIds } = await import("@/auth/store");
-      for (const organizationId of listConfiguredOrganizationIds()) {
-        // Hydrates the in-process registry from the persisted org database URL
-        // and ensures the monitoring tables exist before probing.
+      // Organizations with devices registered in the shared Postgres database
+      // are discovered from the network_devices table itself.
+      const { db } = await import("@/db/client");
+      const { networkDevices } = await import("@/db/schema");
+      const rows = await db().selectDistinct({ organizationId: networkDevices.organizationId }).from(networkDevices);
+      const { tenantMonitorStore } = await import("@/core/monitoring/store");
+      for (const row of rows) {
+        const organizationId = row.organizationId;
         const settings = await tenantMonitorStore.getSettings(organizationId);
         if (!settings.intervalSeconds || settings.intervalSeconds < 10) continue;
         await networkMonitor.runCycle(organizationId, "ping");

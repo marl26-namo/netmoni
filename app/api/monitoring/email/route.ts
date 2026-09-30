@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { sessionWorkspaceId } from "@/auth/store";
+import { sessionWorkspace } from "@/auth/store";
 import { renderTemplate, sendFaultEmail, smtpConfigFromEnv } from "@/core/monitoring/mailer";
 import { tenantMonitorStore } from "@/core/monitoring/store";
 
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     const subject = renderTemplate(body.subject?.trim() || "[Network Alert] {{deviceName}} is {{status}}", values);
     const text = body.message?.trim() || "Network fault detected. Please investigate the affected node.";
     const sent = await sendFaultEmail(smtp, { to, subject, text });
-    if (body.alertId) await tenantMonitorStore.updateAlertEmailStatus(sessionWorkspaceId(request), body.alertId, "sent");
+    if (body.alertId) await tenantMonitorStore.updateAlertEmailStatus(await sessionWorkspace(request), body.alertId, "sent");
     return NextResponse.json({ sent: true, messageId: sent.messageId, accepted: sent.accepted });
   } catch (error) {
     return NextResponse.json({ sent: false, error: error instanceof Error ? error.message : "SMTP dispatch failed" }, { status: 502 });

@@ -1,5 +1,5 @@
 {
-  "name": "softcape-next",
+  "name": "netmoni",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -7,18 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:generate": "npm run db:generate:auth && npm run db:generate:tenant",
-    "db:migrate": "npm run db:migrate:auth && npm run db:migrate:tenant",
-    "db:generate:auth": "drizzle-kit generate --config=drizzle.config.ts",
-    "db:migrate:auth": "drizzle-kit migrate --config=drizzle.config.ts",
-    "db:generate:tenant": "drizzle-kit generate --config=drizzle.tenant.config.ts",
-    "db:migrate:tenant": "drizzle-kit migrate --config=drizzle.tenant.config.ts"
+    "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
+    "db:push": "drizzle-kit push --config=drizzle.config.ts",
+    "db:studio": "drizzle-kit studio --config=drizzle.config.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.48.0",
-    "mysql2": "^3.24.4",
     "net-snmp": "^3.29.1",
     "next": "16.3.5",
     "nodemailer": "^10.0.13",
@@ -28,7 +24,6 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^9.6.0",
     "@types/net-snmp": "^3.23.0",
     "@types/node": "^20",
     "@types/nodemailer": "^8.0.2",

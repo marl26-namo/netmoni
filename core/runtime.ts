@@ -66,25 +66,25 @@ automationEngine.registerCapability({ name: "tcp_check", description: "Run a TCP
   return { ...input, open: result.open, latencyMs: result.latencyMs, error: result.error };
 });
 
-if (!workflowRepository.findById("network-fault-notification")) {
-  workflowRepository.save(createWorkflow({
-    id: "network-fault-notification",
-    name: "Network Fault Notification",
-    description: "Ping/TCP/SNMP monitoring with AI synthesis and administrator email dispatch.",
-    trigger: { event: "monitor.run" },
-    nodes: [
-      { id: "monitor-devices", kind: "action", name: "Monitor devices", capability: "monitor_device", config: { probe: "ping" } },
-      { id: "check-severity", kind: "logic", name: "Check severity", config: { condition: "status == Offline OR severity == Critical" } },
-      { id: "ai-message", kind: "action", name: "AI fault message", capability: "ai_fault_message", config: { instruction: "Explain the network fault, affected device, severity and recommended action." } },
-      { id: "send-email", kind: "action", name: "Send Gmail", capability: "send_admin_email", config: { host: "smtp.gmail.com", port: 465, secure: true } },
-    ],
-  }));
-}
+// The default fault-notification workflow is persisted to Postgres on first use.
+workflowRepository.seed(createWorkflow({
+  id: "network-fault-notification",
+  name: "Network Fault Notification",
+  description: "Ping/TCP/SNMP monitoring with AI synthesis and administrator email dispatch.",
+  trigger: { event: "monitor.run" },
+  nodes: [
+    { id: "monitor-devices", kind: "action", name: "Monitor devices", capability: "monitor_device", config: { probe: "ping" } },
+    { id: "check-severity", kind: "logic", name: "Check severity", config: { condition: "status == Offline OR severity == Critical" } },
+    { id: "ai-message", kind: "action", name: "AI fault message", capability: "ai_fault_message", config: { instruction: "Explain the network fault, affected device, severity and recommended action." } },
+    { id: "send-email", kind: "action", name: "Send Gmail", capability: "send_admin_email", config: { host: "smtp.gmail.com", port: 465, secure: true } },
+  ],
+}));
 
 export async function publishEvent(type: string, payload: Record<string, unknown>, source = "api") {
   const event: Event = { id: randomUUID(), type, payload, source, occurredAt: new Date().toISOString() };
   await eventBus.publish(event);
-  const workflows = workflowRepository.list().filter((workflow) => workflow.enabled && workflow.trigger.event === type);
+  const organizationId = String(payload.organizationId ?? "local-workspace");
+  const workflows = (await workflowRepository.list(organizationId)).filter((workflow) => workflow.enabled && workflow.trigger.event === type);
   const executions = await Promise.all(workflows.map((workflow) => automationEngine.execute(workflow, event)));
   return { event, executions };
 }
