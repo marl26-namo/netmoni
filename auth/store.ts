@@ -15,6 +15,7 @@ sqliteAuth?.exec(`
   CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS organizations (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS organization_members (organization_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member', PRIMARY KEY (organization_id, user_id));
+  CREATE TABLE IF NOT EXISTS organization_databases (organization_id TEXT PRIMARY KEY, url TEXT NOT NULL, configured_at TEXT NOT NULL);
 `);
 
 export function hashPassword(password: string) {
@@ -63,6 +64,20 @@ export function organizationDetailsForUser(userId: string) {
   const stored = sqliteAuth?.prepare("SELECT o.id, o.name FROM organizations o INNER JOIN organization_members m ON m.organization_id = o.id WHERE m.user_id = ? ORDER BY o.created_at LIMIT 1").get(userId) as { id: string; name: string } | undefined;
   return stored ?? [...organizations.values()].find((organization) => organization.ownerUserId === userId);
 }
+
+export function setOrganizationDatabaseUrl(organizationId: string, url: string) {
+  sqliteAuth?.prepare("INSERT INTO organization_databases (organization_id, url, configured_at) VALUES (?, ?, ?) ON CONFLICT(organization_id) DO UPDATE SET url = excluded.url, configured_at = excluded.configured_at").run(organizationId, url, new Date().toISOString());
+}
+
+export function getOrganizationDatabaseUrl(organizationId: string) {
+  const row = sqliteAuth?.prepare("SELECT url FROM organization_databases WHERE organization_id = ?").get(organizationId) as { url: string } | undefined;
+  return row?.url;
+}
+
+export function listConfiguredOrganizationIds(): string[] {
+  const rows = sqliteAuth?.prepare("SELECT organization_id FROM organization_databases").all() as Array<{ organization_id: string }> | undefined;
+  return (rows ?? []).map((row) => row.organization_id);
+}
 export function listUsers() {
   const stored = sqliteAuth?.prepare("SELECT id, email, name, status, created_at FROM users ORDER BY created_at DESC").all() as Array<Record<string, string>> | undefined;
   return stored?.map((user) => ({ id: user.id, email: user.email, name: user.name, status: user.status, createdAt: user.created_at })) ?? [...users.values()].map((user) => ({ id: user.id, email: user.email, name: user.name, status: user.status, createdAt: user.createdAt }));
@@ -81,4 +96,11 @@ export function sessionFromToken(token: string) {
   const row = sqliteAuth?.prepare("SELECT id, user_id, expires_at FROM sessions WHERE token_hash = ?").get(createHash("sha256").update(token).digest("hex")) as { id: string; user_id: string; expires_at: string } | undefined;
   if (!row || new Date(row.expires_at) <= new Date()) return undefined;
   return { userId: row.user_id, sessionId: row.id, expiresAt: row.expires_at };
+}
+
+export function sessionWorkspaceId(request: Request): string {
+  const token = request.headers.get("cookie")?.match(/(?:^|; )softcape_session=([^;]+)/)?.[1];
+  const session = token ? sessionFromToken(token) : undefined;
+  if (!session) return "local-workspace";
+  return organizationForUser(session.userId) ?? "local-workspace";
 }

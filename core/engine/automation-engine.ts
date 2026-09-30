@@ -21,6 +21,14 @@ export class AutomationEngine {
       let output = event.payload;
       for (const node of workflow.nodes) {
         if (!node.capability) continue;
+        if (node.kind === "logic") {
+          const condition = String((node.config as Record<string, unknown> | undefined)?.condition ?? "");
+          const status = String(output.status ?? "");
+          const severity = String(output.severity ?? "");
+          const passes = !condition || /offline|critical/i.test(condition) ? status === "Offline" || severity.toLowerCase() === "critical" : true;
+          if (!passes) break;
+          continue;
+        }
         const handler = this.handlers.get(node.capability);
         if (!handler) throw new Error(`Capability not registered: ${node.capability}`);
         output = await handler({ ...output, ...(node.config ?? {}) }, event);
