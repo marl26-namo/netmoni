@@ -16,6 +16,15 @@ type WorkflowNode = {
   config?: Record<string, string>;
 };
 
+type SavedWorkflow = {
+  id: string;
+  name: string;
+  nodes: WorkflowNode[];
+  published: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type EntryStage = "login" | "organization" | "editor";
 type EditorSection = "Overview" | "Workflows" | "Executions" | "Devices" | "Alerts" | "Settings";
 type Viewport = { x: number; y: number; zoom: number };
@@ -24,55 +33,8 @@ const NODE_W = 112;
 const NODE_H = 132;
 const DEFAULT_VIEWPORT: Viewport = { x: 160, y: 80, zoom: 0.9 };
 
-const initialNodes: WorkflowNode[] = [
-  {
-    id: "fault-trigger",
-    type: "trigger",
-    name: "Network Fault",
-    description: "Starts when a monitored device fails or crosses a threshold.",
-    icon: "fault",
-    x: 120,
-    y: 170,
-  },
-  {
-    id: "fault-condition",
-    type: "logic",
-    name: "Check Severity",
-    description: "Routes critical and offline incidents.",
-    icon: "if",
-    x: 420,
-    y: 170,
-    config: { condition: "status == Offline OR severity == Critical" },
-  },
-  {
-    id: "ai-message",
-    type: "action",
-    name: "AI Message",
-    description: "Creates a clear administrator-ready incident message.",
-    icon: "ai",
-    x: 720,
-    y: 170,
-    config: {
-      model: "gemini",
-      instruction: "Explain the network fault, affected device, severity and recommended action.",
-    },
-  },
-  {
-    id: "send-email",
-    type: "action",
-    name: "Send Gmail",
-    description: "Sends the AI-generated fault message to the administrator Gmail.",
-    icon: "mail",
-    x: 1020,
-    y: 170,
-    config: {
-      host: "smtp.gmail.com",
-      port: "465",
-      secure: "true",
-      to: "admin",
-    },
-  },
-];
+const initialNodes: WorkflowNode[] = [];
+
 
 const nodeLibrary = [
   { type: "trigger" as const, name: "Network Fault", description: "Start when a device fails", icon: "fault" },
@@ -150,7 +112,7 @@ export default function NetworkAutomationEditor() {
 
   /* ---------------- network automation workspace ---------------- */
   const [nodes, setNodes] = useState<WorkflowNode[]>(initialNodes);
-  const [selectedNode, setSelectedNode] = useState("fault-trigger");
+  const [selectedNode, setSelectedNode] = useState("");
   const [viewport, setViewport] = useState<Viewport>(DEFAULT_VIEWPORT);
   const [running, setRunning] = useState(false);
   const [published, setPublished] = useState(false);
@@ -164,7 +126,11 @@ export default function NetworkAutomationEditor() {
   const [uiNotice, setUiNotice] = useState("");
   const [activeSection, setActiveSection] = useState<EditorSection>("Workflows");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
-  const [workflowName, setWorkflowName] = useState("Network Fault Notification");
+  const [workflowName, setWorkflowName] = useState("");
+  const [workflowLibrary, setWorkflowLibrary] = useState<SavedWorkflow[]>([]);
+  const [activeWorkflowId, setActiveWorkflowId] = useState<string | null>(null);
+  const [workflowView, setWorkflowView] = useState<"library" | "editor">("library");
+  const [workflowSearch, setWorkflowSearch] = useState("");
   const [saveState, setSaveState] = useState<"saved" | "saving">("saved");
   const [inspectorTab, setInspectorTab] = useState<"Parameters" | "Settings">("Parameters");
   const [smtpUser, setSmtpUser] = useState("");
@@ -310,10 +276,9 @@ export default function NetworkAutomationEditor() {
   }, [theme]);
 
   useEffect(() => {
+    if (workflowView !== "editor" || !activeWorkflowId) return;
     setSaveState("saving");
-    const t = window.setTimeout(() => setSaveState("saved"), 700);
-    return () => window.clearTimeout(t);
-  }, [nodes, workflowName, published]);
+  }, [nodes, workflowName, published, workflowView, activeWorkflowId]);
 
   useEffect(() => {
     const el = canvasRef.current;
@@ -398,8 +363,8 @@ export default function NetworkAutomationEditor() {
     const id = crypto.randomUUID();
     const anchor = nodes[nodes.length - 1];
     const anchorSize = anchor ? nodeDimensions(anchor) : { width: NODE_W, height: NODE_H };
-    const x = anchor ? anchor.x + anchorSize.width + 90 : 250;
-    const y = anchor ? anchor.y : 180;
+    const x = anchor ? anchor.x + anchorSize.width + 90 : 420;
+    const y = anchor ? anchor.y : 260;
     const config: Record<string, string> =
       item.name === "Send Gmail"
         ? { host: "smtp.gmail.com", port: "465", secure: "true", to: adminEmail }
@@ -430,8 +395,10 @@ export default function NetworkAutomationEditor() {
   const removeNode = (id: string) => {
     setNodes((cur) => {
       const next = cur.filter((n) => n.id !== id);
-      if (!next.length) setSelectedNode("");
-      else if (id === selectedNode) setSelectedNode(next[0].id);
+      if (!next.length) {
+        setSelectedNode("");
+        setRightOpen(false);
+      } else if (id === selectedNode) setSelectedNode(next[0].id);
       return next;
     });
   };
@@ -475,7 +442,7 @@ export default function NetworkAutomationEditor() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           type: "workflow.execute",
-          payload: { workflowId: "network-fault-notification", organizationId, probe: "ping" },
+          payload: { workflowId: activeWorkflowId ?? "unsaved-workflow", organizationId, probe: "ping" },
         }),
       });
       const data = await response.json() as { executions?: Array<{ output?: { outcomes?: Array<{ deviceName?: string; status?: string; ok?: boolean; latencyMs?: number | null; packetLossPercent?: number }> } }>; error?: string };
@@ -608,7 +575,166 @@ export default function NetworkAutomationEditor() {
     setEntryBusy(false);
   };
 
-  const renderWorkflow = () => (
+  const WORKFLOW_STORAGE_KEY = "netmoni-workflows-v1";
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(WORKFLOW_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as SavedWorkflow[];
+      if (Array.isArray(parsed)) setWorkflowLibrary(parsed);
+    } catch {
+      setWorkflowLibrary([]);
+    }
+  }, []);
+
+  const persistWorkflowLibrary = (next: SavedWorkflow[]) => {
+    setWorkflowLibrary(next);
+    window.localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(next));
+  };
+
+  const createWorkflow = () => {
+    setActiveWorkflowId(null);
+    setWorkflowName("");
+    setNodes([]);
+    setSelectedNode("");
+    setPublished(false);
+    setViewport(DEFAULT_VIEWPORT);
+    setLeftOpen(true);
+    setRightOpen(false);
+    setWorkflowView("editor");
+    setSaveState("saved");
+  };
+
+  const openWorkflow = (workflow: SavedWorkflow) => {
+    setActiveWorkflowId(workflow.id);
+    setWorkflowName(workflow.name);
+    setNodes(workflow.nodes ?? []);
+    setSelectedNode(workflow.nodes?.[0]?.id ?? "");
+    setPublished(Boolean(workflow.published));
+    setViewport(DEFAULT_VIEWPORT);
+    setLeftOpen(true);
+    setRightOpen(Boolean(workflow.nodes?.length));
+    setWorkflowView("editor");
+    setSaveState("saved");
+  };
+
+  const saveCurrentWorkflow = () => {
+    const now = new Date().toISOString();
+    const id = activeWorkflowId ?? crypto.randomUUID();
+    const existing = workflowLibrary.find((workflow) => workflow.id === id);
+    const name = workflowName.trim() || "Untitled workflow";
+    const saved: SavedWorkflow = {
+      id,
+      name,
+      nodes,
+      published,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    const next = [saved, ...workflowLibrary.filter((workflow) => workflow.id !== id)];
+    setActiveWorkflowId(id);
+    setWorkflowName(name);
+    persistWorkflowLibrary(next);
+    setSaveState("saved");
+    showNotice("Workflow saved.");
+  };
+
+  const deleteWorkflow = (id: string) => {
+    const next = workflowLibrary.filter((workflow) => workflow.id !== id);
+    persistWorkflowLibrary(next);
+    if (activeWorkflowId === id) {
+      setActiveWorkflowId(null);
+      setWorkflowView("library");
+      setNodes([]);
+      setSelectedNode("");
+    }
+    showNotice("Workflow deleted.");
+  };
+
+  const duplicateWorkflow = (workflow: SavedWorkflow) => {
+    const copy: SavedWorkflow = {
+      ...workflow,
+      id: crypto.randomUUID(),
+      name: `${workflow.name} copy`,
+      nodes: workflow.nodes.map((node) => ({ ...node, id: crypto.randomUUID() })),
+      published: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    persistWorkflowLibrary([copy, ...workflowLibrary]);
+    showNotice("Workflow duplicated.");
+  };
+
+  const renderWorkflowLibrary = () => {
+    const visible = workflowLibrary.filter((workflow) =>
+      workflow.name.toLowerCase().includes(workflowSearch.trim().toLowerCase())
+    );
+
+    return (
+      <section className="workflow-library-page">
+        <div className="workflow-library-inner">
+          <div className="workflow-library-topbar">
+            <div>
+              <span className="overline">AUTOMATION / WORKFLOWS</span>
+              <h1>Workflows</h1>
+              <p>Create, organize and open your network automations.</p>
+            </div>
+            <button className="btn primary workflow-create-btn" type="button" onClick={createWorkflow}>
+              <Plus size={16} /> Create workflow
+            </button>
+          </div>
+
+          <div className="workflow-library-toolbar">
+            <div className="workflow-library-search">
+              <span>⌕</span>
+              <input value={workflowSearch} onChange={(e) => setWorkflowSearch(e.target.value)} placeholder="Search workflows..." />
+            </div>
+            <span className="workflow-count">{workflowLibrary.length} {workflowLibrary.length === 1 ? "workflow" : "workflows"}</span>
+          </div>
+
+          {!workflowLibrary.length ? (
+            <div className="workflow-empty-state">
+              <div className="workflow-empty-icon"><Workflow size={28} /></div>
+              <h2>Start with a blank workflow</h2>
+              <p>Your workspace is empty. Build your first network automation from scratch using triggers, conditions and actions.</p>
+              <button className="btn primary" type="button" onClick={createWorkflow}><Plus size={16} /> Create workflow from scratch</button>
+            </div>
+          ) : !visible.length ? (
+            <div className="workflow-no-results"><SearchIconPlaceholder /> No workflows match “{workflowSearch}”.</div>
+          ) : (
+            <div className="workflow-grid">
+              {visible.map((workflow) => (
+                <article className="workflow-card" key={workflow.id}>
+                  <button className="workflow-card-main" type="button" onClick={() => openWorkflow(workflow)}>
+                    <div className="workflow-card-icon"><Workflow size={19} /></div>
+                    <div className="workflow-card-copy">
+                      <strong>{workflow.name}</strong>
+                      <span>{workflow.nodes.length} {workflow.nodes.length === 1 ? "node" : "nodes"} · Updated {new Date(workflow.updatedAt).toLocaleDateString()}</span>
+                    </div>
+                    <ArrowRight size={17} className="workflow-card-arrow" />
+                  </button>
+                  <div className="workflow-card-footer">
+                    <span className={workflow.published ? "workflow-status published" : "workflow-status"}>
+                      <i /> {workflow.published ? "Published" : "Draft"}
+                    </span>
+                    <div className="workflow-card-actions">
+                      <button type="button" onClick={() => duplicateWorkflow(workflow)} title="Duplicate"><Plus size={14} /></button>
+                      <button type="button" onClick={() => deleteWorkflow(workflow.id)} title="Delete"><Trash2 size={14} /></button>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  };
+
+  const SearchIconPlaceholder = () => <span aria-hidden="true" style={{ display: "inline-flex" }}><CircleHelp size={16} /></span>;
+
+  const renderWorkflow = () => workflowView === "library" ? renderWorkflowLibrary() : (
     <div className="editor-body">
       {leftOpen && (
         <aside className="nodes-panel">
@@ -691,6 +817,14 @@ export default function NetworkAutomationEditor() {
         onPointerMove={onPointerMove}
         onPointerUp={() => { dragRef.current = null; }}
       >
+        {!nodes.length && (
+          <div className="canvas-empty-state">
+            <div className="canvas-empty-mark"><Workflow size={25} /></div>
+            <h2>Your workflow is empty</h2>
+            <p>Add a network trigger from the node library to start building your automation.</p>
+            <button type="button" className="btn primary" onClick={() => setLeftOpen(true)}><Plus size={15} /> Add first node</button>
+          </div>
+        )}
         <div className="canvas-viewport" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})` }}>
           <svg className="edges-layer">
             {nodes.slice(0, -1).map((node, i) => {
@@ -1010,7 +1144,7 @@ export default function NetworkAutomationEditor() {
           </div>
           <div className="inspector-footer">
             <button type="button" className="btn ghost" onClick={closeNodeInspector}>Cancel / close</button>
-            <button type="button" className="btn primary" onClick={() => { setSaveState("saving"); window.setTimeout(() => setSaveState("saved"), 500); showNotice(`${selected.name} configuration saved.`); }}>Save node</button>
+            <button type="button" className="btn primary" onClick={() => { setSaveState("saving"); saveCurrentWorkflow(); showNotice(`${selected.name} configuration saved.`); }}>Save node</button>
           </div>
         </aside>
       )}
@@ -1874,29 +2008,41 @@ export default function NetworkAutomationEditor() {
       </aside>
 
       <main className="editor-main">
-        <header className="editor-header">
+        <header className={`editor-header ${workflowView === "library" ? "library-header" : "workflow-editor-header"}`}>
           <div className="header-left">
-            <div className="crumb"><span>{organizationName || "Organization"}</span><span className="crumb-sep">/</span><span>Network Automation</span></div>
-            <div className="wf-title-row">
-              <input className="wf-name-input" value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} spellCheck={false} />
-              <span className={`save-state ${saveState}`}><i />{saveState === "saved" ? "Saved" : "Saving…"}</span>
-            </div>
+            <div className="crumb"><span>{organizationName || "Organization"}</span><span className="crumb-sep">/</span><span>Workflows</span>{workflowView === "editor" && <><span className="crumb-sep">/</span><span>{workflowName || "Untitled workflow"}</span></>}</div>
+            {workflowView === "editor" ? (
+              <div className="wf-title-row">
+                <button className="back-workflows" type="button" onClick={() => setWorkflowView("library")} title="Back to workflows"><ArrowRight size={15} style={{ transform: "rotate(180deg)" }} /></button>
+                <input className="wf-name-input" value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} placeholder="Untitled workflow" spellCheck={false} />
+                <span className={`save-state ${saveState}`}><i />{saveState === "saved" ? "Saved" : "Unsaved changes"}</span>
+              </div>
+            ) : (
+              <div className="wf-title-row"><strong className="workspace-title">Workflow library</strong></div>
+            )}
           </div>
           <div className="header-actions">
             <button className="btn ghost theme-toggle" onClick={() => setTheme((value) => value === "dark" ? "light" : "dark")} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>
               {theme === "dark" ? <Globe2 size={15} /> : <Zap size={15} />}
               {theme === "dark" ? "Light" : "Dark"}
             </button>
-            <button className="btn ghost" onClick={() => setActiveSection("Devices")}>Devices</button>
-            <button className={`btn ghost ${published ? "is-published" : ""}`} onClick={() => setPublished(!published)}>{published ? "● Published" : "Publish"}</button>
-            <button className="btn primary" onClick={executeWorkflow} disabled={running}><span className="play-icon">{running ? <Activity size={15} /> : <Play size={14} fill="currentColor" />}</span>{running ? "Executing…" : "Test workflow"}</button>
+            {workflowView === "library" ? (
+              <button className="btn primary" type="button" onClick={createWorkflow}><Plus size={15} /> Create workflow</button>
+            ) : (
+              <>
+                <button className="btn ghost" type="button" onClick={() => setWorkflowView("library")}>Workflows</button>
+                <button className="btn ghost" type="button" onClick={saveCurrentWorkflow}>Save</button>
+                <button className={`btn ghost ${published ? "is-published" : ""}`} onClick={() => setPublished(!published)}>{published ? "● Published" : "Publish"}</button>
+                <button className="btn primary" onClick={executeWorkflow} disabled={running}><span className="play-icon">{running ? <Activity size={15} /> : <Play size={14} fill="currentColor" />}</span>{running ? "Executing…" : "Test workflow"}</button>
+              </>
+            )}
           </div>
         </header>
 
         <div className="editor-tabs">
           {(["Workflows", "Executions", "Devices", "Alerts"] as EditorSection[]).map((tab) => (
             <button key={tab} className={`editor-tab ${activeSection === tab ? "active" : ""}`} onClick={() => setActiveSection(tab)}>
-              {tab === "Workflows" ? "Automation Editor" : tab}
+              {tab === "Workflows" ? "Workflows" : tab}
             </button>
           ))}
         </div>
