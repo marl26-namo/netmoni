@@ -14,7 +14,12 @@ import * as tenantMysqlSchema from "@/db/schema/tenant-mysql";
 
 export type DatabaseDialect = "postgres" | "mysql" | "sqlite";
 export type DatabaseScope = "auth" | "organization";
-export type DatabaseClient = { dialect: DatabaseDialect; scope: DatabaseScope; url: string; db: unknown };
+export type DatabaseClient = { dialect: DatabaseDialect; scope: DatabaseScope; url: string; db: unknown; raw: RawConnection };
+
+export type RawConnection =
+  | { kind: "sqlite"; connection: BetterSqlite3.Database }
+  | { kind: "postgres"; pool: Pool }
+  | { kind: "mysql"; pool: ReturnType<typeof createPool> };
 
 function dialectFor(url: string): DatabaseDialect {
   if (url.startsWith("postgres://") || url.startsWith("postgresql://")) return "postgres";
@@ -28,14 +33,14 @@ export function createDatabase(url = config.authDatabase, scope: DatabaseScope =
   const dialect = dialectFor(url);
   if (dialect === "postgres") {
     const pool = new Pool({ connectionString: url });
-    return { dialect, scope, url, db: drizzlePostgres(pool, { schema: scope === "auth" ? authPostgresSchema : tenantPostgresSchema }) };
+    return { dialect, scope, url, db: drizzlePostgres(pool, { schema: scope === "auth" ? authPostgresSchema : tenantPostgresSchema }), raw: { kind: "postgres", pool } };
   }
   if (dialect === "mysql") {
     const pool = createPool(url);
-    return { dialect, scope, url, db: drizzleMysql(pool, { mode: "default", schema: scope === "auth" ? authMysqlSchema : tenantMysqlSchema }) };
+    return { dialect, scope, url, db: drizzleMysql(pool, { mode: "default", schema: scope === "auth" ? authMysqlSchema : tenantMysqlSchema }), raw: { kind: "mysql", pool } };
   }
   const sqlite = new BetterSqlite3(sqlitePath(url));
-  return { dialect, scope, url, db: drizzleSqlite(sqlite, { schema: scope === "auth" ? authSqliteSchema : tenantSqliteSchema }) };
+  return { dialect, scope, url, db: drizzleSqlite(sqlite, { schema: scope === "auth" ? authSqliteSchema : tenantSqliteSchema }), raw: { kind: "sqlite", connection: sqlite } };
 }
 
 export const authDatabase = createDatabase(config.authDatabase, "auth");

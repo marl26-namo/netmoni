@@ -87,6 +87,13 @@ const nodeLibrary = [
   { type: "action" as const, name: "Record Incident", description: "Save the network event", icon: "db" },
 ];
 
+const initialDevices = [
+  { name: "Core Router", ip: "192.168.1.1", subnet: "255.255.255.0", mac: "", type: "router", status: "Online" },
+  { name: "Admin Switch", ip: "192.168.1.10", subnet: "255.255.255.0", mac: "", type: "switch", status: "Online" },
+  { name: "Application Server", ip: "192.168.1.20", subnet: "255.255.255.0", mac: "", type: "server", status: "Warning" },
+  { name: "Library Access Point", ip: "192.168.1.30", subnet: "", mac: "", type: "router", status: "Offline" },
+];
+
 function edgePath(x1: number, y1: number, x2: number, y2: number) {
   const dx = Math.max(70, Math.abs(x2 - x1) / 2);
   return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
@@ -153,6 +160,8 @@ export default function NetworkAutomationEditor() {
   const [rightOpen, setRightOpen] = useState(true);
   const [settingsState, setSettingsState] = useState({ pollingInterval: "30", failureThreshold: "3" });
   const [executionHistory, setExecutionHistory] = useState<Array<{ id: string; time: string; status: string; detail: string }>>([]);
+  const [backendAlerts, setBackendAlerts] = useState<Array<{ id: string; deviceName: string; ipAddress: string; severity: string; status: string; summary: string; emailStatus: string; createdAt: string }>>([]);
+  const [backendResults, setBackendResults] = useState<Array<{ id: string; deviceName: string; ipAddress: string; probe: string; ok: boolean; latencyMs: number | null; packetLossPercent: number; bandwidthInMbps: number | null; bandwidthOutMbps: number | null; checkedAt: string }>>([]);
   const [uiNotice, setUiNotice] = useState("");
   const [activeSection, setActiveSection] = useState<EditorSection>("Workflows");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
@@ -164,12 +173,7 @@ export default function NetworkAutomationEditor() {
   const [smtpFrom, setSmtpFrom] = useState("network-monitor@yourdomain.com");
   const [smtpRecipients, setSmtpRecipients] = useState("admin@yourdomain.com");
   const [smtpState, setSmtpState] = useState("");
-  const [devices, setDevices] = useState([
-    { name: "Core Router", ip: "192.168.1.1", subnet: "255.255.255.0", mac: "", type: "router", status: "Online" },
-    { name: "Admin Switch", ip: "192.168.1.10", subnet: "255.255.255.0", mac: "", type: "switch", status: "Online" },
-    { name: "Application Server", ip: "192.168.1.20", subnet: "255.255.255.0", mac: "", type: "server", status: "Warning" },
-    { name: "Library Access Point", ip: "192.168.1.30", subnet: "", mac: "", type: "router", status: "Offline" },
-  ]);
+  const [devices, setDevices] = useState(initialDevices);
   const [deviceFormOpen, setDeviceFormOpen] = useState(false);
   const [deviceForm, setDeviceForm] = useState({
     name: "",
@@ -217,6 +221,84 @@ export default function NetworkAutomationEditor() {
   useEffect(() => {
     if (currentUser.email) setSmtpRecipients(currentUser.email);
   }, [currentUser.email]);
+
+  useEffect(() => {
+    if (entryStage !== "editor") return;
+    let cancelled = false;
+    const loadWorkspace = async () => {
+      try {
+        const [deviceResponse, settingsResponse, alertsResponse, resultsResponse] = await Promise.all([
+          fetch("/api/monitoring/devices"),
+          fetch("/api/monitoring/settings"),
+          fetch("/api/monitoring/alerts"),
+          fetch("/api/monitoring/results?limit=50"),
+        ]);
+        if (cancelled) return;
+        if (deviceResponse.ok) {
+          const data = await deviceResponse.json() as { devices?: Array<Record<string, unknown>> };
+          if (data.devices?.length) {
+            setDevices(data.devices.map((device) => ({
+              name: String(device.name ?? ""),
+              ip: String(device.ip ?? ""),
+              subnet: String(device.subnet ?? ""),
+              mac: String(device.mac ?? ""),
+              type: String(device.type ?? "router"),
+              status: String(device.status ?? "Online"),
+            })));
+          }
+        }
+        if (settingsResponse.ok) {
+          const data = await settingsResponse.json() as { settings?: Record<string, unknown> };
+          if (data.settings) {
+            setSettingsState((current) => ({
+              ...current,
+              pollingInterval: String(data.settings?.intervalSeconds ?? current.pollingInterval),
+              failureThreshold: String(data.settings?.failureThreshold ?? current.failureThreshold),
+            }));
+            if (data.settings?.adminEmail) setSmtpRecipients(String(data.settings.adminEmail));
+            if (data.settings?.aiProvider) setAiProvider(String(data.settings.aiProvider).replace(/\b\w/g, (c) => c.toUpperCase()));
+            if (data.settings?.aiInstruction) setAiInstruction(String(data.settings.aiInstruction));
+          }
+        }
+        if (alertsResponse.ok) {
+          const data = await alertsResponse.json() as { alerts?: Array<Record<string, unknown>> };
+          setBackendAlerts((data.alerts ?? []).map((alert) => ({
+            id: String(alert.id ?? ""),
+            deviceName: String(alert.deviceName ?? ""),
+            ipAddress: String(alert.ipAddress ?? ""),
+            severity: String(alert.severity ?? "info"),
+            status: String(alert.status ?? ""),
+            summary: String(alert.summary ?? ""),
+            emailStatus: String(alert.emailStatus ?? "pending"),
+            createdAt: String(alert.createdAt ?? ""),
+          })));
+        }
+        if (resultsResponse.ok) {
+          const data = await resultsResponse.json() as { results?: Array<Record<string, unknown>> };
+          setBackendResults((data.results ?? []).map((result) => ({
+            id: String(result.id ?? ""),
+            deviceName: String(result.deviceName ?? ""),
+            ipAddress: String(result.ipAddress ?? ""),
+            probe: String(result.probe ?? "ping"),
+            ok: Boolean(result.ok),
+            latencyMs: result.latencyMs === null || result.latencyMs === undefined ? null : Number(result.latencyMs),
+            packetLossPercent: Number(result.packetLossPercent ?? 0),
+            bandwidthInMbps: result.bandwidthInMbps === null || result.bandwidthInMbps === undefined ? null : Number(result.bandwidthInMbps),
+            bandwidthOutMbps: result.bandwidthOutMbps === null || result.bandwidthOutMbps === undefined ? null : Number(result.bandwidthOutMbps),
+            checkedAt: String(result.checkedAt ?? ""),
+          })));
+        }
+      } catch {
+        /* workspace loads with local defaults when the API is unreachable */
+      }
+    };
+    void loadWorkspace();
+    const poll = window.setInterval(loadWorkspace, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(poll);
+    };
+  }, [entryStage]);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("network-automation-theme");
@@ -394,12 +476,19 @@ export default function NetworkAutomationEditor() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           type: "workflow.execute",
-          payload: { workflowId: "network-fault-notification", organizationId, nodes },
+          payload: { workflowId: "network-fault-notification", organizationId, probe: "ping" },
         }),
       });
-      if (!response.ok) throw new Error("Execution endpoint returned an error");
-      setExecutionHistory((cur) => cur.map((item) => item.id === executionId ? { ...item, status: "Success" } : item));
-      showNotice("Workflow test completed successfully.");
+      const data = await response.json() as { executions?: Array<{ output?: { outcomes?: Array<{ deviceName?: string; status?: string; ok?: boolean; latencyMs?: number | null; packetLossPercent?: number }> } }>; error?: string };
+      if (!response.ok) throw new Error(data.error ?? "Execution endpoint returned an error");
+      const outcomes = data.executions?.[0]?.output?.outcomes ?? [];
+      const faulted = outcomes.filter((outcome) => outcome.status && outcome.status !== "Online");
+      setExecutionHistory((cur) => cur.map((item) => item.id === executionId ? {
+        ...item,
+        status: "Success",
+        detail: outcomes.length ? `${outcomes.length} devices probed · ${faulted.length} fault(s)` : "No registered devices to probe",
+      } : item));
+      showNotice(outcomes.length ? `Monitor cycle complete: ${outcomes.length} devices, ${faulted.length} fault(s).` : "No devices registered in the monitoring database yet.");
     } catch {
       setExecutionHistory((cur) => cur.map((item) => item.id === executionId ? { ...item, status: "Failed" } : item));
       showNotice("Workflow was saved locally, but the execution API could not be reached.");
@@ -424,25 +513,41 @@ export default function NetworkAutomationEditor() {
     ]);
     setDeviceForm({ name: "", ip: "", subnet: "", mac: "", type: "router" });
     setDeviceFormOpen(false);
+    void fetch("/api/monitoring/devices", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: deviceForm.name.trim(), ip: deviceForm.ip.trim(), subnet: deviceForm.subnet.trim(), mac: deviceForm.mac.trim(), type: deviceForm.type }),
+    }).then((response) => response.json().then((data) => ({ ok: response.ok, data }))).then(({ ok, data }) => {
+      if (ok) showNotice(`${deviceForm.name.trim()} registered for monitoring.`);
+      else showNotice(String((data as { error?: string }).error ?? "Device could not be saved to the monitoring database."));
+    }).catch(() => showNotice("Device kept locally; the monitoring API was unreachable."));
   };
 
   const removeDevice = (ip: string) => {
     setDevices((cur) => cur.filter((d) => d.ip !== ip));
+    void fetch(`/api/monitoring/devices?ip=${encodeURIComponent(ip)}`, { method: "DELETE" }).catch(() => undefined);
   };
 
   const saveSmtp = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
     setSmtpState("Saving SMTP configuration...");
-    /*
-      Google SMTP values:
-      host: smtp.gmail.com
-      port: 465
-      secure: true
-      auth.user: Google/Gmail address
-      auth.pass: Google App Password
-      The actual Nodemailer transporter belongs on the server, never in this client component.
-    */
-    setSmtpState("SMTP configuration ready. Store these values server-side before enabling live dispatch.");
+    try {
+      const [settingsResponse, emailStatus] = await Promise.all([
+        fetch("/api/monitoring/settings", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ adminEmail: smtpRecipients || adminEmail }),
+        }),
+        fetch("/api/monitoring/email"),
+      ]);
+      const statusData = await emailStatus.json() as { smtpConfigured?: boolean; host?: string; port?: number; user?: string | null };
+      if (!settingsResponse.ok) throw new Error("Settings endpoint rejected the update");
+      setSmtpState(statusData.smtpConfigured
+        ? `SMTP ready on ${statusData.host}:${statusData.port} as ${statusData.user}. Fault alerts will dispatch to ${smtpRecipients || adminEmail}.`
+        : "Recipient saved. Set SMTP_HOST, SMTP_PORT, SMTP_USER and SMTP_PASSWORD server-side to enable live dispatch.");
+    } catch {
+      setSmtpState("SMTP configuration saved locally; the settings API was unreachable.");
+    }
   };
 
   /* ---------------- auth / org flows: unchanged API process ---------------- */
@@ -949,9 +1054,38 @@ export default function NetworkAutomationEditor() {
             <div className="device-meta"><span>Subnet</span><strong>{d.subnet || "Not set"}</strong></div>
             <div className="device-meta"><span>MAC</span><strong>{d.mac || "Not set"}</strong></div>
             <div className={`device-status ${d.status.toLowerCase()}`}><span />{d.status}</div>
+            <button className="btn ghost" title="Run ping test against this device" onClick={() => {
+              showNotice(`Testing ${d.name} (${d.ip})...`);
+              void fetch("/api/monitoring/results", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ ip: d.ip, probe: "ping" }),
+              }).then((response) => response.json()).then((data: { outcome?: { status?: string; latencyMs?: number | null; packetLossPercent?: number }; error?: string }) => {
+                if (data.error) { showNotice(data.error); return; }
+                const outcome = data.outcome;
+                setDevices((cur) => cur.map((entry) => entry.ip === d.ip ? { ...entry, status: outcome?.status ?? entry.status } : entry));
+                showNotice(`${d.name}: ${outcome?.status ?? "unknown"} · ${outcome?.latencyMs ?? "–"} ms · ${outcome?.packetLossPercent ?? 0}% loss`);
+              }).catch(() => showNotice("Device test API unreachable."));
+            }}>Test</button>
             <button className="icon-btn danger" title="Remove device" onClick={() => removeDevice(d.ip)}><Trash2 size={16} /></button>
           </article>)}
         </div>
+
+        {backendResults.length > 0 && (
+          <div className="dashboard-integration-grid">
+            <article className="dashboard-integration-card">
+              <div className="dashboard-integration-icon">⇅</div>
+              <div><strong>Latest probe: {backendResults[0].deviceName}</strong>
+                <small>{backendResults[0].probe.toUpperCase()} · {backendResults[0].checkedAt.slice(0, 19).replace("T", " ")}</small>
+                <p>{backendResults[0].ok ? "Reachable" : "Unreachable"} · {backendResults[0].latencyMs ?? "–"} ms · {backendResults[0].packetLossPercent}% loss{backendResults[0].bandwidthInMbps !== null ? ` · in ${backendResults[0].bandwidthInMbps.toFixed(2)} Mbps` : ""}{backendResults[0].bandwidthOutMbps !== null ? ` · out ${backendResults[0].bandwidthOutMbps.toFixed(2)} Mbps` : ""}</p>
+              </div>
+            </article>
+            <article className="dashboard-integration-card">
+              <div className="dashboard-integration-icon">✓</div>
+              <div><strong>Checks stored</strong><small>Monitoring database</small><p>{backendResults.length} recent probe results retained.</p></div>
+            </article>
+          </div>
+        )}
 
         {deviceFormOpen && <div className="modal-backdrop" onMouseDown={() => setDeviceFormOpen(false)}>
           <div className="device-modal" onMouseDown={(e) => e.stopPropagation()}>
@@ -979,8 +1113,9 @@ export default function NetworkAutomationEditor() {
       return <section className="section-panel"><div className="section-panel-inner wide-panel">
         <span className="overline">NETWORK / ALERTS</span><h1>Fault notifications</h1>
         <p>Events generated by the monitoring workflow and dispatched through the configured email node.</p>
+        {backendAlerts.map((alert) => <article className="dashboard-integration-card" key={alert.id}><div className="dashboard-integration-icon">!</div><div><strong>{alert.deviceName} — {alert.status} ({alert.severity})</strong><small>{alert.ipAddress} · {alert.createdAt.slice(0, 19).replace("T", " ")}</small><p>{alert.summary}</p><p>Email: {alert.emailStatus}</p></div></article>)}
         {active.map((d) => <article className="dashboard-integration-card" key={d.ip}><div className="dashboard-integration-icon">!</div><div><strong>{d.name} — {d.status}</strong><small>{d.ip}</small><p>Workflow: Network Fault → AI Message → Gmail</p></div></article>)}
-        {!active.length && <p>No active faults.</p>}
+        {!active.length && !backendAlerts.length && <p>No active faults.</p>}
       </div></section>;
     }
 
@@ -989,6 +1124,15 @@ export default function NetworkAutomationEditor() {
         <span className="overline">AUTOMATION / EXECUTIONS</span><h1>Workflow executions</h1>
         <p>Monitor each network event as it moves through detection, condition checks and notification dispatch.</p>
         <div className="dashboard-integration-grid">
+          {backendResults.length > 0 && backendResults.slice(0, 6).map((result, i) => (
+            <article className="dashboard-integration-card" key={result.id}>
+              <div className="dashboard-integration-icon">{String(i + 1).padStart(2, "0")}</div>
+              <div><strong>{result.deviceName} · {result.probe.toUpperCase()} · {result.ok ? "Reachable" : "Unreachable"}</strong>
+                <small>{result.ipAddress} · {result.checkedAt.slice(0, 19).replace("T", " ")}</small>
+                <p>{result.latencyMs ?? "–"} ms · {result.packetLossPercent}% loss{result.bandwidthInMbps !== null ? ` · in ${result.bandwidthInMbps.toFixed(2)} Mbps` : ""}{result.bandwidthOutMbps !== null ? ` · out ${result.bandwidthOutMbps.toFixed(2)} Mbps` : ""}</p>
+              </div>
+            </article>
+          ))}
           {executionHistory.length ? executionHistory.map((run, i) => (
             <article className="dashboard-integration-card" key={run.id}>
               <div className="dashboard-integration-icon">{String(i + 1).padStart(2, "0")}</div>
@@ -1007,7 +1151,15 @@ export default function NetworkAutomationEditor() {
           <label>Polling interval<select value={settingsState.pollingInterval} onChange={(e) => setSettingsState((v) => ({ ...v, pollingInterval: e.target.value }))}><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label>
           <label>Failure threshold<select value={settingsState.failureThreshold} onChange={(e) => setSettingsState((v) => ({ ...v, failureThreshold: e.target.value }))}><option value="2">2 missed responses</option><option value="3">3 missed responses</option><option value="5">5 missed responses</option></select></label>
           <label>Default notification workflow<input value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} /></label>
-          <button className="btn primary" type="button" onClick={() => showNotice("Monitoring settings saved.")}>Save monitoring settings</button>
+          <button className="btn primary" type="button" onClick={() => {
+            void fetch("/api/monitoring/settings", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ intervalSeconds: Number(settingsState.pollingInterval), failureThreshold: Number(settingsState.failureThreshold), adminEmail: smtpRecipients || adminEmail, aiProvider: aiProvider.toLowerCase(), aiInstruction }),
+            }).then((response) => response.json()).then((data: { settings?: Record<string, unknown>; error?: string }) => {
+              showNotice(data.error ? `Settings could not be saved: ${data.error}` : "Monitoring settings saved to the organization database.");
+            }).catch(() => showNotice("Settings kept locally; the monitoring API was unreachable."));
+          }}>Save monitoring settings</button>
           <div className="database-choice"><strong>Google SMTP / Nodemailer</strong><span>The workflow sends the AI-generated message to the authenticated administrator Gmail. Google App Passwords and AI API keys must be stored server-side.</span></div>
         </div>
       </div></section>;
