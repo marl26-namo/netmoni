@@ -1588,3 +1588,89 @@
   .app-shell .workflow-library-search { width: 100%; }
   .app-shell .workflow-grid { grid-template-columns: 1fr; }
 }
+
+/* ================================================================
+   Responsive dashboard — same visual design, usable on any screen.
+   Desktop layouts are untouched by these rules.
+   ================================================================ */
+
+/* Mobile browser chrome does not count towards the workspace height. */
+.app-shell { height: 100dvh; }
+.entry-shell { min-height: 100dvh; }
+
+/* Touch devices pan and drag the workflow canvas with a finger. */
+.canvas { touch-action: none; }
+
+/* A workflow must be named before it can be saved. */
+.wf-name-input.name-missing {
+  border-color: var(--sc-red);
+  background: rgba(240, 68, 56, 0.06);
+}
+.wf-name-input.name-missing:focus {
+  border-color: var(--sc-red);
+  box-shadow: 0 0 0 3px rgba(240, 68, 56, 0.14);
+}
+
+@media (max-width: 980px) {
+  .editor-header {
+    height: auto;
+    min-height: 60px;
+    flex-wrap: wrap;
+    padding: 9px 12px;
+    row-gap: 8px;
+  }
+  .header-left { flex: 1 1 260px; }
+  .header-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .section-panel-inner { margin: 26px auto 44px; padding: 0 18px; }
+}
+
+@media (max-width: 860px) {
+  .entry-frame { flex-direction: column; gap: 24px; padding: 8px 20px 40px; }
+  .entry-aside { max-width: 560px; }
+  .entry-card { width: min(420px, 100%); }
+}
+
+@media (max-width: 760px) {
+  .dashboard-integration-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 700px) {
+  /* Node library and inspector stay reachable as overlay drawers
+     instead of disappearing on small screens. */
+  .nodes-panel,
+  .inspector {
+    display: flex;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    z-index: 90;
+    width: min(320px, calc(100vw - 60px));
+    box-shadow: var(--network-shadow, 0 16px 45px rgba(0, 0, 0, .3));
+  }
+  .nodes-panel {
+    left: 60px;
+    right: auto;
+    border-right: 1px solid var(--network-border, var(--sc-border));
+  }
+  .inspector {
+    right: 0;
+    left: auto;
+    border-left: 1px solid var(--network-border, var(--sc-border));
+  }
+
+  .wf-title-row { flex-wrap: wrap; }
+  .wf-name-input { max-width: 100%; min-width: 0; flex: 1 1 140px; }
+
+  .editor-tabs { overflow-x: auto; }
+  .editor-tab { flex-shrink: 0; }
+
+  .device-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+  .device-row .device-main { flex: 1 1 140px; min-width: 0; }
+
+  .ui-notice { left: 12px; right: 12px; bottom: 12px; }
+}
